@@ -481,3 +481,37 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .pack-status.not-imported{background:var(--warn-bg);border:1px solid #f0dfa6;color:var(--warn)}
 .pack-example{display:flex;gap:10px;align-items:flex-start;background:#f3f5f8;border:1.5px dashed #b7c0cd;border-radius:12px;padding:12px 14px;margin-top:14px;color:var(--ink-2)}
 .pack-example .pill{flex:none;margin-top:2px}
+
+/* ---------- Zip exchange (Shared with me) ---------- */
+.shared-card{margin-top:18px;border-left:4px solid var(--brand-2)}
+.shared-list{display:flex;flex-direction:column;margin-top:6px}
+.shared-row{display:flex;gap:12px;align-items:center;padding:11px 2px;border-bottom:1px solid #eef1f5;text-decoration:none;color:var(--ink);min-height:56px}
+.shared-row:last-child{border-bottom:0}
+.shared-row .num{width:34px;height:34px;border-radius:10px;background:var(--brand-soft);color:var(--brand);display:grid;place-items:center;font-weight:800;flex:none}
+.shared-row .grow{flex:1;min-width:0;display:flex;flex-direction:column}
+.imported-banner{display:flex;flex-direction:column;gap:2px;background:var(--warn-bg);border:1.5px solid #e8cf7a;color:#5f4b00;border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:.9rem}
+.link-hero.shared{background:linear-gradient(135deg,#3d4a63,#14213d)}
+.review-actions{display:flex;flex-direction:column}
+.review-row{display:flex;gap:12px;align-items:center;padding:11px 2px;border-bottom:1px solid #eef1f5;text-decoration:none;color:var(--ink);min-height:52px}
+.review-row:last-child{border-bottom:0}
+.review-row .grow{flex:1;min-width:0;display:flex;flex-direction:column}
+.return-card{border-top:4px solid var(--brand)}
+.share-block{border-top:1px solid #eef1f5;padding:12px 0}
+.share-block:first-of-type{border-top:0;padding-top:2px}
+.share-block p{margin:4px 0 8px}
+.act-grid{grid-template-areas:"evidence people" "evidence plan" "criteria plan" "criteria forms" "criteria share"}
+.ag-share{grid-area:share}
+.cmp-row{display:grid;grid-template-columns:minmax(90px,1fr) 1fr 1fr;gap:8px;padding:8px 10px;border-bottom:1px solid #eef1f5;font-size:.84rem;align-items:start}
+.cmp-row .cmp-l{font-weight:700}
+.cmp-head{font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:#f8fafc;border-radius:8px 8px 0 0}
+.cmp-row.warn{background:var(--warn-bg)}
+.cmp-row.ok .cmp-r{color:var(--signed)}
+.warn-box{background:var(--warn-bg);border:1px solid #f0dfa6;border-radius:10px;padding:10px 12px;margin:12px 0}
+.warn-box ul{margin:6px 0 0;padding-left:18px}
+.manifest{margin-top:10px}
+.manifest-pre{background:#0f172a;color:#dbeafe;border-radius:10px;padding:12px;font-size:.72rem;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:8px 0 0}
+.modal.merge{width:min(640px,96vw)}
+.merge-foot{flex-wrap:wrap}
+.backup-first{background:#f5fbf7;border:1px solid #cfe9d8;border-radius:10px;padding:10px 12px;align-items:flex-start}
+@media (max-width:1100px){ .act-grid{grid-template-areas:"evidence" "criteria" "plan" "people" "forms" "share"} }
+@media (max-width:520px){ .cmp-row{grid-template-columns:1fr;gap:1px} .cmp-head{display:none} .cmp-row .cmp-e::before{content:"Expected: ";color:var(--muted);font-weight:600} .cmp-row .cmp-r::before{content:"Received: ";color:var(--muted);font-weight:600} }

@@ -69,6 +69,13 @@
   const tplFind = (unit, kind, comp) => TPL.find(t => t.unit === unit && t.kind === kind && (comp == null || t.comp === comp));
   const packCount = k => TPL.filter(t => t.pack === k).length;
   const PACK_STATE = "not-imported"; // layout sample only; nothing is imported or stored yet
+  // --- Sample: activities shared with you as zips (no accounts, browser-local) ---
+  const SHARED = [
+    { n: 2, candidate: "[Candidate A]", route: "G2 Surveyor + G2 Core", title: "Routine online pre-trench shift", dates: "8–11 Oct 2026", status: "awaiting", statusLabel: "Awaiting review", exportedBy: "[Candidate A]", exportedAt: "15 Oct 2026, 09:14 BST", pkg: 4, basedOn: 3, app: "0.2 (layout)", criteria: 31, files: 5, progress: "Plan agreed · 0 of 31 coded" },
+    { n: 3, candidate: "[Candidate B]", route: "G2 Surveyor + G2 Core", title: "Data handover and reporting", dates: "12–14 Oct 2026", status: "ready", statusLabel: "Ready to return", exportedBy: "[Candidate B]", exportedAt: "16 Oct 2026, 18:02 BST", pkg: 2, basedOn: 1, app: "0.2 (layout)", criteria: 20, files: 3, progress: "Signed · feedback added" },
+    { n: 1, candidate: "[Candidate A]", route: "G2 Surveyor + G2 Core", title: "Set-up and calibration checks", dates: "4–7 Oct 2026", status: "imported", statusLabel: "Imported", exportedBy: "[Candidate A]", exportedAt: "17 Oct 2026, 08:40 BST", pkg: 1, basedOn: 0, app: "0.2 (layout)", criteria: 42, files: 8, progress: "Not reviewed yet" }];
+  const sharedOf = n => SHARED.find(x => x.n === Number(n)) || SHARED[0];
+  const sharedRow = x => `<a class="shared-row" href="#/shared/${x.n}"><span class="num">${x.n}</span><span class="grow"><b>Activity ${x.n} · ${esc(x.title)}</b><span class="small muted">From ${esc(x.candidate)} · ${esc(x.dates)} · Package v${x.pkg}</span><span class="small muted">${esc(x.progress)}</span></span><span class="pill ${x.status === "ready" ? "signed" : x.status === "awaiting" ? "mapped" : "planned"}">${x.statusLabel}</span><span class="chev" aria-hidden="true">›</span></a>`;
   const packBanner = (where) => `<div class="pack-banner" role="note"><span class="pb-ico" aria-hidden="true">🧰</span><div class="grow"><b>Forms pack: not imported yet</b><div class="small muted">Download the current pack from MTCS when you start compiling your portfolio, then import it here. The app uses those blank templates throughout. A weekly check can flag "pack update available" if MTCS publishes a newer revision.</div></div><a class="btn sm primary" href="#/forms">Get the forms pack</a></div>`;
   const tplLink = (t, label, tag) => t ? `<div class="tpl-item"><span class="tpl-ico" aria-hidden="true">📄</span><span class="grow"><b>${esc(label || t.label)}</b><span class="fname">${esc(t.file)}${t.mtcsType === "zip" ? " (inside the MTCS ‘All Files’ zip)" : ""}</span>${tag || ""}
       <span class="tpl-acts">${t.pack && t.pack.startsWith("g2-") ? `<span class="pill planned">Included in pack</span>` : ""}${t.mtcsUrl ? `<a class="btn sm primary" href="${esc(t.mtcsUrl)}" target="_blank" rel="noopener" title="Opens MTCS Online in a new tab">Download from MTCS ↗</a>` : `<a class="btn sm primary" href="${esc((MP[t.pack] || MP["g2-surveyor"] || {}).url || "")}" target="_blank" rel="noopener">Download from MTCS ↗</a>`}<button class="btn sm" data-toast="Layout only. Later you'll pick the PDF you downloaded and it's kept in this browser.">Add my downloaded copy</button></span></span></div>` : "";
@@ -100,6 +107,7 @@
     else if (page === "backup") body = viewBackup();
     else if (page === "forms") body = viewForms();
     else if (page === "more") body = viewMore();
+    else if (page === "shared") { role = "shared"; body = viewShared(parts[1] || 2); }
     else if (page === "route") { role = "landing"; body = viewLanding(params); }
     else { body = viewDashboard(); nav = "dashboard"; }
 
@@ -113,18 +121,19 @@
     let overlay = "";
     if (params.get("c")) overlay = drawer(params.get("c"));
     if (params.get("modal") === "send") overlay = sendModal(parts[1] || 2);
+    if (params.get("modal") === "merge") overlay = mergeModal(parts[1] || 2);
     app.innerHTML = topbar(role, parts) + `<div class="proto-banner">Layout prototype: sample data only. Buttons are not wired up yet.</div>` + shell + overlay;
-    document.title = "MTCS Portfolio Tracker – " + ({ assessor: "Assessor view", witness: "Witness view", landing: "Choose your route" }[role] || page);
+    document.title = "MTCS Portfolio Tracker – " + ({ assessor: "Assessor view", witness: "Witness view", shared: "Shared with me", landing: "Choose your route" }[role] || page);
   }
 
   function topbar(role, parts) {
     const ar = roleOf(ui.active.role);
-    if (role === "assessor" || role === "witness") {
+    if (role === "assessor" || role === "witness" || role === "shared") {
       return `<header class="topbar">
         <div class="brand"><div class="logo" aria-hidden="true">MT</div><span>Portfolio Tracker</span></div>
-        <span class="pack-chip">${role === "assessor" ? "Assessor view" : "Witness view"}</span>
+        <span class="pack-chip">${role === "assessor" ? "Assessor view" : role === "witness" ? "Witness view" : "Imported copy"}</span>
         <div class="spacer"></div>
-        <button class="route-chip exit" data-href="#/activity/${esc(parts[1] || 1)}" title="Leave the preview">✕ Exit preview</button>
+        <button class="route-chip exit" data-href="${role === "shared" ? "#/" : "#/activity/" + esc(parts[1] || 1)}" title="Leave this view">✕ ${role === "shared" ? "Exit imported copy" : "Exit preview"}</button>
       </header>`;
     }
     const landing = role === "landing";
@@ -149,6 +158,7 @@
       ${a("matrix", "#/matrix", "▦", "Coverage matrix", { n: t.gap, alert: t.gap > 0, title: t.gap + " criteria with a gap" })}
       ${a("evidence", "#/evidence", "▤", "Evidence library", { n: unm || S.evidence.length, alert: unm > 0, title: unm ? unm + " items unmapped" : "items" })}
       ${a("forms", "#/forms", "📄", "Forms and templates")}
+      <a href="#/"><span class="ico">⇄</span><span class="lbl">Shared with me</span></a>
       ${a("export", "#/export", "⇪", "Export for MTCS")}
       ${a("backup", "#/backup", "☁", "Backup and restore")}
       ${a("settings", "#/settings", "⚙", "Settings")}
@@ -333,6 +343,23 @@
           ${f("surveyor", "testimony", "Candidate Testimony")}
         </div>
         <a class="small" href="#/forms">Competence sheets and UKQ sheets (13 each) →</a>
+      </section>
+
+      <section class="card ag-share"><div class="card-head"><h2>Share this activity (zip)</h2><span class="right pill planned">No accounts</span></div>
+        <div class="share-block"><b>Export activity for assessor (.zip)</b>
+          <p class="small muted">One zip for this activity: plan, criteria states, evidence files and manifest.json (IDs, version, SHA-256 hashes). Send it by email, message or USB. Your assessor does not need your portfolio or an account.</p>
+          <div class="btn-row"><button class="btn primary" data-toast="Layout only: no zip is created yet.">⤓ Export activity for assessor (.zip)</button></div>
+          <p class="tiny muted">Sample: last export v3 · 11 Oct 2026 · ${planned.length} criteria · hashes included to detect missing or changed files.</p></div>
+        <div class="share-block"><b>Import assessor return (.zip)</b>
+          <p class="small muted">When your assessor sends a reviewed zip back, import it here. You review the changes first. Import never silently overwrites: it is applied as a new version on top, with rollback.</p>
+          <div class="btn-row"><a class="btn" href="#/activity/${a.n}?modal=merge">⤒ Import assessor return (.zip)</a></div></div>
+        <div class="share-block"><b>Version history</b>
+          <ul class="list small">
+            <li><span class="pill signed">v3</span><div class="grow">Current · exported to assessor 11 Oct 2026</div></li>
+            <li><span class="pill planned">v2</span><div class="grow">Before Activity ${a.n} evidence tidy-up</div><button class="btn sm" data-toast="Layout only: restore is not wired.">Restore</button></li>
+            <li><span class="pill planned">v1</span><div class="grow">First plan</div><button class="btn sm" data-toast="Layout only: restore is not wired.">Restore</button></li>
+          </ul>
+          <p class="tiny muted">After an import, the previous version stays here as a snapshot. Use Restore previous version to roll back.</p></div>
       </section>
     </div>`;
   }
@@ -692,6 +719,7 @@
       ${r("#/backup", "☁", "Backup and restore", `Last backup ${backupDays()} days ago`, backupDays() > 7 ? `<span class="pill gap">${backupDays()} days</span>` : "")}
       ${r("#/export", "⇪", "Export for MTCS", "Zip by upload area, checklist")}
       ${r("#/forms", "📄", "Forms and templates", "Links to the official MTCS forms")}
+      ${r("#/", "⇄", "Shared with me", "Import an activity zip someone sent you")}
       ${r("#/matrix?f=all", "▦", "Coverage matrix (all)", "All 79 criteria × 3 activities")}
       ${r("#/settings", "⚙", "Settings", "Route, packs, profile, links, about")}
       ${r("#/", "⇄", "Change route", "Pick another role or grade")}
@@ -800,6 +828,13 @@
         ${folded.length ? `<a class="soon-line" href="#/?role=${sel}${selGrade ? "&grade=" + selGrade : ""}&all=1"><span class="pill planned">Coming soon</span><span class="grow small">${folded.map(r => esc(r.name)).join(" · ")}</span><span class="chev" aria-hidden="true">▾</span></a>` : ""}
       </div>
 
+      <section class="card shared-card" id="shared"><div class="card-head"><span class="imp-ico" aria-hidden="true">⇄</span><h2>Shared with me</h2><span class="right pill info">${SHARED.length} sample</span></div>
+        <p class="small" style="margin:0 0 8px">Has someone sent you an activity to review? You don't need their portfolio or an account. Import their activity zip here: it opens as a separate imported copy in this browser. Review, edit and sign it, then export a return zip and send it back any way you like (email, message, USB).</p>
+        <div class="btn-row"><button class="btn primary" data-toast="Layout only: no zip is read yet. Later you'd pick the .zip you were sent.">⤒ Import activity zip (.zip)</button></div>
+        <div class="shared-list">${SHARED.map(sharedRow).join("")}</div>
+        <p class="tiny muted" style="margin:8px 0 0">Imported copies stay separate from your own portfolios. Sample data only.</p>
+      </section>
+
       <section class="card import-card"><div class="card-head"><span class="imp-ico" aria-hidden="true">⤒</span><h2>Lost your data? Import a backup</h2></div>
         <p class="small" style="margin:0 0 6px">Your portfolio is stored <b>in this browser on this device</b>. If the browser data is cleared, or you move to a new phone or laptop, import your backup <b>.zip</b> and everything is restored.</p>
         <div class="btn-row"><button class="btn primary" data-toast="Not connected yet – layout only. Would open the file picker for a backup .zip.">⤒ Import backup (.zip)</button><a class="btn" href="#/backup">More restore options</a></div>
@@ -849,9 +884,95 @@
           <li><span>✅</span><div class="grow">Evidence files (photos, logs, written products)</div></li>
           <li><span>✅</span><div class="grow">Signatures and the audit trail</div></li>
           <li><span>✅</span><div class="grow">Settings and the loaded criteria packs</div></li>
+          <li><span>✅</span><div class="grow">Shared (imported) activities and version-history snapshots</div></li>
         </ul>
         <p class="tiny muted">The backup holds your evidence, so keep it somewhere private. Check that client data is allowed to leave the vessel before backing up to the cloud.</p>
       </section>
+    </div>`;
+  }
+
+  // ---------- 13. Shared activity (imported copy, not your portfolio) ----------
+  function viewShared(n) {
+    const x = sharedOf(n);
+    const a = actOf(x.n) || S.activities[1];
+    return `<div class="link-shell">
+      <div class="imported-banner" role="note"><b>Imported copy — not your portfolio.</b><span>Changes here only affect this imported copy in this browser. Nothing is merged into your own portfolios. When you're done, export a reviewed zip and send it back to the candidate.</span></div>
+      <div class="link-hero shared"><div class="small" style="opacity:.85">Shared with me · imported activity</div>
+        <h1 style="margin:4px 0 2px">Activity ${x.n} · ${esc(x.title)}</h1>
+        <div class="small" style="opacity:.9">Candidate: ${esc(x.candidate)} · ${esc(x.route)} · ${esc(x.dates)}</div>
+        <div class="meta"><span class="pill">${x.statusLabel}</span><span class="pill">${x.criteria} criteria</span><span class="pill">${x.files} evidence files</span></div></div>
+
+      <section class="card"><div class="card-head"><h2>Package details</h2><span class="right pill info">manifest.json</span></div>
+        <dl class="kv small">
+          <dt>Exported by</dt><dd>${esc(x.exportedBy)}</dd><dt>Exported</dt><dd>${esc(x.exportedAt)}</dd>
+          <dt>Package version</dt><dd>v${x.pkg} (export sequence ${x.pkg})</dd><dt>Based on</dt><dd>Candidate activity v${x.basedOn}</dd>
+          <dt>App version</dt><dd>${esc(x.app)}</dd><dt>IDs</dt><dd class="fname">portfolio: sample-pf-001 · activity: sample-act-${x.n}</dd>
+          <dt>Files & hashes</dt><dd>${x.files} evidence files listed in manifest.json with SHA-256 hashes · <b>All hashes verified on import</b></dd>
+        </dl>
+        <p class="tiny muted" style="margin:8px 0 0">Hashes detect missing or changed files. If a file is missing or its hash doesn't match, the import review warns you before anything is applied.</p>
+      </section>
+
+      <section class="card"><div class="card-head"><h2>Review this activity</h2><span class="right small muted">${esc(x.progress)}</span></div>
+        <div class="review-actions">
+          ${[["1", "Plan", "Read and agree the Assessment Plan", "#/assessor/" + x.n + "?step=1"], ["2", "Criteria", "Code criteria O/P/W/Q/N/C/N/A against the evidence", "#/assessor/" + x.n + "?step=2"], ["3", "Knowledge", "Record underpinning-knowledge questions and answers", "#/assessor/" + x.n + "?step=3"], ["4", "Feedback", "Fill in the Assessment Feedback Form", "#/assessor/" + x.n + "?step=4"], ["5", "Sign", "Check the summary, then sign and lock", "#/assessor/" + x.n + "?step=5"]].map(r => `<a class="review-row" href="${r[3]}"><span class="step">${r[0]}</span><span class="grow"><b>${r[1]}</b><span class="small muted">${r[2]}</span></span><span class="chev" aria-hidden="true">›</span></a>`).join("")}
+        </div>
+        <div class="field" style="margin-top:12px"><label for="ac">Your comments (saved in this imported copy)</label><textarea id="ac" placeholder="e.g. S09c coded from verification report; two questions still to ask"></textarea></div>
+      </section>
+
+      <section class="card return-card"><div class="card-head"><h2>Send it back</h2></div>
+        <p class="small" style="margin:0 0 8px">Export one zip with your codes, comments, feedback and signatures, plus an updated manifest.json (new export sequence, based on v${x.basedOn}). Send it by email, message or USB. The candidate reviews the changes before anything is applied to their portfolio.</p>
+        <button class="btn primary block lg" data-toast="Layout only: no zip is created yet.">⤓ Export reviewed activity zip (.zip)</button>
+        <p class="tiny muted" style="margin:8px 0 0">Layout only: importing and exporting zips are not wired in this prototype.</p>
+      </section>
+    </div>`;
+  }
+
+  // ---------- 14. Pre-import review / merge ----------
+  function mergeModal(n) {
+    const a = actOf(n) || S.activities[1];
+    const back = "#/activity/" + a.n;
+    const row = (label, expected, received, cls) => `<div class="cmp-row ${cls || ""}"><span class="cmp-l">${label}</span><span class="cmp-e">${expected}</span><span class="cmp-r">${received}</span></div>`;
+    return `<div class="scrim" data-href="${back}"></div>
+    <div class="modal merge" role="dialog" aria-label="Review assessor return before importing">
+      <header><div><h2 style="margin:0">Review before you import</h2><p class="small muted" style="margin:4px 0 0">Activity ${a.n} · ${esc(a.title)}</p></div><button class="close" data-href="${back}" aria-label="Close">✕</button></header>
+      <div class="body">
+        <p class="small" style="margin:0 0 10px"><span class="fname">Activity${a.n}_assessor-return_v4.zip</span> from [Assessor]. <b>Import never silently overwrites.</b> Nothing changes until you choose below.</p>
+
+        <div class="cmp-head cmp-row"><span class="cmp-l"></span><span class="cmp-e">Expected (yours)</span><span class="cmp-r">Received</span></div>
+        ${row("Package based on", "Your current activity v3", "Candidate v2", "warn")}
+        ${row("Criteria changed", "—", "29 of 31 coded or signed", "ok")}
+        ${row("Assessor comments", "0", "+6 comments, 1 feedback form", "ok")}
+        ${row("Signatures", "0 signed by assessor", "+29 criteria signed, feedback signed", "ok")}
+        ${row("Evidence items", "5 files", "5 files · 0 removed", "ok")}
+        ${row("File hashes (SHA-256)", "5 in manifest", "5 verified · 0 missing", "ok")}
+
+        <div class="warn-box"><b>⚠️ Warnings</b><ul class="small">
+          <li><b>Based on an older version:</b> this return is based on your v2, but your activity is now v3. You edited 2 criteria after v2 (S06b note, S05c evidence link). Applying applies the assessor's changes as a new version on top; your 2 edits are kept and listed after import.</li>
+          <li>No warning: signed and evidence counts have not gone down, and no files are missing.</li>
+        </ul></div>
+        <p class="tiny muted">If a return had fewer signed or evidence items, missing files, or a hash mismatch, that would be listed here as a warning too.</p>
+
+        <details class="manifest"><summary><b class="small">What's in manifest.json (sample)</b></summary>
+          <pre class="manifest-pre">{
+  "portfolioId": "sample-pf-001", "activityId": "sample-act-${a.n}",
+  "candidate": "[Candidate]", "assessor": "[Assessor]",
+  "exportSeq": 4, "baseVersion": 2, "appVersion": "0.2-layout",
+  "exportedAt": "2026-10-17T14:20:00+01:00",
+  "criteria": [{ "id": "S01a", "code": "O", "state": "signed" }, "…"],
+  "files": [{ "name": "S05d_A2_OnlineLog_20261008.pdf",
+              "sha256": "9f2c…a41b" }, "…"]
+}</pre>
+          <p class="tiny muted" style="margin:6px 0 0">SHA-256 hashes detect missing or changed files before anything is applied.</p>
+        </details>
+
+        <label class="checkline backup-first"><input type="checkbox" checked> <span><b>Create backup zip first (recommended)</b><span class="small muted" style="display:block">Saves a backup of your whole portfolio before applying. On by default.</span></span></label>
+      </div>
+      <footer class="merge-foot">
+        <a class="btn" href="${back}">Cancel</a>
+        <button class="btn" data-toast="Layout only: no copy is saved yet.">Save as separate copy</button>
+        <button class="btn primary" data-toast="Layout only: nothing is imported or changed yet.">Import and apply</button>
+      </footer>
+      <p class="tiny muted" style="padding:0 20px 16px;margin:0">Applying makes this activity v4 on top of your v3. Your previous version stays under Version history with <b>Restore previous version</b>, so you can roll back. Layout only: no zip is read or applied in this prototype.</p>
     </div>`;
   }
 
