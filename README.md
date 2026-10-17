@@ -17,7 +17,10 @@ Use the switcher in the header to view as **Candidate**, **Assessor link** or **
 ## Screens (hash routes)
 | Route | Screen |
 |---|---|
-| `#/` | Candidate dashboard: readiness, 70/30 direct-evidence meter, outstanding signatures, next actions, activity cards |
+| `#/` | **Opening screen**: choose your route. Role cards (Surveyor, Survey Engineer, Data Processor, Party Chief, Client Rep), grade picker G2 / G1 / Senior, route summary (role + matching Core added automatically), My portfolios, and "Lost your data? Import a backup" |
+| `#/?role=surveyor&grade=G2` | Opening screen with Surveyor expanded and G2 picked |
+| `#/dashboard` | Candidate dashboard: readiness, 70/30 direct-evidence meter, outstanding signatures, next actions, activity cards |
+| `#/backup` | Backup and restore: save backup .zip to this device, Google Drive, OneDrive, restore from local zip / Drive / OneDrive, auto-backup toggle and frequency (all layout only) |
 | `#/activity/1` to `#/activity/3` | Activity workspace: plan summary, evidence and add buttons, criteria checklist, send to assessor |
 | `#/activity/2?modal=send` | Send-link dialog |
 | `#/matrix` | Coverage matrix: 79 criteria × Activities 1–3, with filters |
@@ -40,6 +43,7 @@ packs/g2-surveyor-2026.json  G2 Surveyor + G2 Core pack: units, competences, cri
 tools/extract_criteria.py  one-off: builds the pack JSON from the extracted MTCS pack text
 tools/build-data.py        bundles the pack JSON into js/packs.generated.js
 tools/screenshots.js       Playwright screenshots (desktop 1440×900, phone 390×844)
+tools/screenshots-route.js Phone (412×900) screenshots of the opening and backup screens, plus a click-through check
 screenshots/               current screenshots
 ```
 
@@ -53,3 +57,10 @@ code is tied to G2.
 Backend and storage, real activity links with email codes, e-signatures and audit trail, pre-filling the
 official MTCS PDFs, zip export, offline sync, and the assessor-training side. The app will never submit to MTCS
 or sign on anyone's behalf.
+
+## Routes and backup (Oct 2026 update)
+- Only **G2 Surveyor + G2 Core** has criteria loaded. Picking any other route opens the same screens with a
+  "criteria pack not loaded yet (layout preview)" banner. Change route from the header chip or the side menu.
+- Party Chief and Client Rep are single level. Which Core unit goes with them is still to be confirmed with MTCS.
+- Data will live in the browser on the device, so the backup .zip is the recovery path: import it from the
+  opening screen or the Backup screen. Cloud backup (Google Drive / OneDrive) is layout only for now.

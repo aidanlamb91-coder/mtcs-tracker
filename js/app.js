@@ -23,7 +23,7 @@
     [1, 2, 3].forEach(a => { const c = cov(id, a); if (c && RANK[c.state] > RANK[best]) best = c.state; });
     return best;
   }
-  const here = () => (location.hash.split("?")[0] || "#/");
+  const here = () => (location.hash.split("?")[0] || "#/dashboard");
   const evFor = id => S.evidence.filter(e => e.criteria.includes(id));
   const actOf = n => S.activities.find(a => a.n === Number(n));
   function compStats(comp) {
@@ -48,6 +48,21 @@
   const EV_ICON = { photo: "📷", file: "📄", written: "✍️", witness: "🧾", record: "✅" };
   const EV_TYPE = { photo: "Photo", file: "File", written: "Written product", witness: "Witness statement", record: "Work record" };
 
+  // ---------- Routes (role + grade, Core added automatically) ----------
+  // GA course ids from research notes (Oct 2026). Only G2 Surveyor has a loaded criteria pack.
+  const CORE_COURSE = { G2: 228, G1: 227, Senior: 213 };
+  const ROLES = [
+    { key: "surveyor", name: "Surveyor", ico: "🧭", blurb: "Online and offshore survey operations", grades: { G2: { pack: "g2-surveyor-2026", course: 1844 }, G1: { course: 1833, note: "About 14 competences, 84 criteria" }, Senior: { course: 1823 } } },
+    { key: "engineer", name: "Survey Engineer", ico: "🔧", blurb: "Survey equipment, mobilisation and fault finding", grades: { G2: { course: 1843 }, G1: { course: 1832 }, Senior: { course: 1822 } } },
+    { key: "processor", name: "Data Processor", ico: "🗺️", blurb: "Processing, QC and charting of survey data", grades: { G2: { course: 1834 }, G1: { course: 1824 }, Senior: { course: 1816 } } },
+    { key: "partychief", name: "Party Chief", ico: "🧑‍✈️", blurb: "Leading the survey team offshore", single: true, grades: { "Single level": { course: 1846 } } },
+    { key: "clientrep", name: "Client Representative", ico: "🤝", blurb: "Representing the client on site", single: true, grades: { "Single level": { course: 1809 } } }
+  ];
+  const roleOf = k => ROLES.find(r => r.key === k);
+  const routeName = (r, g) => r.single ? r.name : `${g} ${r.name}`;
+  const coreName = (r, g) => r.single ? "Core unit to be confirmed with MTCS" : `${g} Core`;
+  const LAST_BACKUP = "Today 16:42 (BST)";
+
   // ---------- Router ----------
   function parse() {
     const h = location.hash.replace(/^#/, "") || "/";
@@ -55,11 +70,11 @@
     const params = new URLSearchParams(q || "");
     return { parts: path.split("/").filter(Boolean), params };
   }
-  const ui = { mUnit: "all", mState: "all", mSearch: "", eType: "all", eUnmapped: false, eSearch: "" };
+  const ui = { active: { role: "surveyor", grade: "G2" }, mUnit: "all", mState: "all", mSearch: "", eType: "all", eUnmapped: false, eSearch: "" };
 
   function render() {
     const { parts, params } = parse();
-    const page = parts[0] || "dashboard";
+    const page = parts[0] || "route";
     let role = "candidate", body = "", nav = page;
     if (page === "assessor") { role = "assessor"; body = viewAssessor(parts[1] || 2); }
     else if (page === "witness") { role = "witness"; body = viewWitness(parts[1] || 1); }
@@ -68,26 +83,35 @@
     else if (page === "evidence") body = viewEvidence();
     else if (page === "export") body = viewExport();
     else if (page === "settings") body = viewSettings();
+    else if (page === "backup") body = viewBackup();
+    else if (page === "route") { role = "landing"; body = viewLanding(params); }
     else { body = viewDashboard(); nav = "dashboard"; }
 
+    const ar = roleOf(ui.active.role);
+    const preview = role === "candidate" && !ar.grades[ui.active.grade].pack
+      ? `<div class="preview-banner" role="note"><b>${esc(routeName(ar, ui.active.grade))}: criteria pack not loaded yet (layout preview).</b> The screens below show the G2 Surveyor sample so you can see the layout. <a href="#/">Change route</a></div>` : "";
     const shell = role === "candidate"
-      ? `<div class="shell">${sidenav(nav)}<main id="main">${body}</main></div>${bottomnav(nav)}`
+      ? `<div class="shell">${sidenav(nav)}<main id="main">${preview}${body}</main></div>${bottomnav(nav)}`
+      : role === "landing" ? `<main id="main" class="landing-main">${body}</main>`
       : `<main id="main" class="link-main">${body}</main>`;
     let overlay = "";
     if (params.get("c")) overlay = drawer(params.get("c"));
     if (params.get("modal") === "send") overlay = sendModal(parts[1] || 2);
-    app.innerHTML = topbar(role) + `<div class="proto-banner">Layout prototype: sample data only. Buttons are not wired up yet.</div>` + shell + overlay;
-    document.title = "MTCS Portfolio Tracker – " + ({ assessor: "Assessor link", witness: "Witness link" }[role] || page);
+    app.innerHTML = topbar(role === "landing" ? "candidate" : role, role === "landing") + `<div class="proto-banner">Layout prototype: sample data only. Buttons are not wired up yet.</div>` + shell + overlay;
+    document.title = "MTCS Portfolio Tracker – " + ({ assessor: "Assessor link", witness: "Witness link", landing: "Choose your route" }[role] || page);
   }
 
-  function topbar(role) {
-    const r = (id, label, href) => `<button data-href="${href}" aria-pressed="${role === id}">${label}</button>`;
+  function topbar(role, landing) {
+    const r = (id, label, href) => `<button data-href="${href}" aria-pressed="${role === id && !landing}">${label}</button>`;
+    const ar = roleOf(ui.active.role);
+    const own = role === "candidate";
     return `<header class="topbar">
       <div class="brand"><div class="logo" aria-hidden="true">MT</div><span>Portfolio Tracker</span></div>
-      <span class="pack-chip">${esc(PACK.name)}</span>
+      ${own ? `<button class="route-chip" data-href="#/" title="Change route">${landing ? "Choose route" : esc(routeName(ar, ui.active.grade)) + (ar.single ? "" : " + Core")} <span aria-hidden="true">▾</span></button>` : `<span class="pack-chip">${esc(PACK.name)}</span>`}
       <div class="spacer"></div>
+      ${own ? `<button class="backup-chip" data-href="#/backup" title="Backup and restore. Last backup ${LAST_BACKUP}"><span class="bdot" aria-hidden="true"></span><span aria-hidden="true">☁</span><span class="bl">Backed up 16:42</span><span class="sr-only">Backup and restore</span></button>` : ""}
       <div class="roles" role="group" aria-label="View as">
-        ${r("candidate", "Candidate", "#/")}${r("assessor", "Assessor link", "#/assessor/2")}${r("witness", "Witness link", "#/witness/1")}
+        ${r("candidate", "Candidate", "#/dashboard")}${r("assessor", "Assessor link", "#/assessor/2")}${r("witness", "Witness link", "#/witness/1")}
       </div>
       <div class="avatar" title="${role === "candidate" ? "Aidan" : role === "assessor" ? "[Assessor]" : "[Witness]"}">${role === "candidate" ? "A" : role === "assessor" ? "As" : "W"}</div>
     </header>`;
@@ -98,7 +122,8 @@
     const a = (id, href, ico, label, count) => `<a href="${href}" class="${cur === id ? "active" : ""}"><span class="ico" aria-hidden="true">${ico}</span><span class="lbl">${label}</span>${count != null ? `<span class="count${count.alert ? " alert" : ""}" title="${count.title}">${count.n}</span>` : ""}</a>`;
     const unm = S.evidence.filter(e => !e.criteria.length).length;
     return `<nav class="sidenav" aria-label="Main">
-      ${a("dashboard", "#/", "◧", "Dashboard")}
+      ${a("route", "#/", "⇄", "Change route")}
+      ${a("dashboard", "#/dashboard", "◧", "Dashboard")}
       <div class="group">Activities</div>
       ${S.activities.map(x => a("activity" + x.n, "#/activity/" + x.n, x.n, esc(x.title))).join("")}
       <a href="#" data-toast="Adding a fourth activity is allowed if the assessor wants one."><span class="ico">＋</span>New activity</a>
@@ -106,13 +131,14 @@
       ${a("matrix", "#/matrix", "▦", "Coverage matrix", { n: t.gap, alert: t.gap > 0, title: t.gap + " criteria not covered" })}
       ${a("evidence", "#/evidence", "▤", "Evidence library", { n: unm || S.evidence.length, alert: unm > 0, title: unm ? unm + " items unmapped" : "items" })}
       ${a("export", "#/export", "⇪", "Export for MTCS")}
+      ${a("backup", "#/backup", "☁", "Backup and restore")}
       ${a("settings", "#/settings", "⚙", "Settings and packs")}
       <div class="trip-box"><b>Current trip</b><br>${esc(S.trip.vessel)}<br>${esc(S.trip.project)}<br><span class="muted">${esc(S.trip.dates)}</span></div>
     </nav>`;
   }
   function bottomnav(cur) {
     const a = (id, href, ico, label) => `<a href="${href}" class="${cur === id || (id === "activity" && cur.startsWith("activity")) ? "active" : ""}"><span class="ico">${ico}</span>${label}</a>`;
-    return `<nav class="bottomnav" aria-label="Main">${a("dashboard", "#/", "◧", "Home")}${a("activity", "#/activity/2", "▣", "Activity")}${a("matrix", "#/matrix", "▦", "Matrix")}${a("evidence", "#/evidence", "▤", "Evidence")}${a("export", "#/export", "⇪", "Export")}</nav>`;
+    return `<nav class="bottomnav" aria-label="Main">${a("dashboard", "#/dashboard", "◧", "Home")}${a("activity", "#/activity/2", "▣", "Activity")}${a("matrix", "#/matrix", "▦", "Matrix")}${a("evidence", "#/evidence", "▤", "Evidence")}${a("export", "#/export", "⇪", "Export")}</nav>`;
   }
 
   // ---------- 1. Dashboard ----------
@@ -212,7 +238,7 @@
           <span class="mcell ${cv.state}" style="min-width:44px;height:22px">${cv.code}</span><span class="crit-id">${k.id}</span><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(k.text)}</span></a>`; }).join("")}</div>`;
     }).join("");
     return `
-    <div class="page-head"><div><div class="crumb"><a href="#/">Dashboard</a> › Activities</div>
+    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Activities</div>
       <h1>Activity ${a.n} · ${esc(a.title)}</h1>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="pill ${pillCls}">${esc(a.statusLabel)}</span><span class="small muted">${esc(a.dates)} · ${esc(S.trip.vessel)}</span></div></div>
       <div class="actions"><a class="btn" href="#/assessor/${a.n}">Preview assessor view</a><a class="btn primary" href="#/activity/${a.n}?modal=send">Send to assessor ➜</a></div></div>
@@ -295,7 +321,7 @@
     });
     const seg = (key, val, label) => `<button data-ui="${key}" data-val="${val}" class="${ui[key] === val ? "on" : ""}">${label}</button>`;
     return `
-    <div class="page-head"><div><div class="crumb"><a href="#/">Dashboard</a> › Portfolio</div><h1>Coverage matrix</h1>
+    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Coverage matrix</h1>
       <p class="muted" style="margin:0">All ${CRITS.length} criteria against Activities 1–3. Each competence must appear in all 3 activities; each criterion at least once.</p></div>
       <div class="actions"><button class="btn" data-toast="Would print the matrix as a one-page summary for the assessor.">Print summary</button></div></div>
     <div class="grid g-4" style="margin-bottom:16px">
@@ -363,7 +389,7 @@
       <td>${e.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}${e.redact ? `<span class="pill warn">Check client data</span>` : ""}</td>
       <td class="small" style="white-space:nowrap">${esc(e.date)}</td></tr>`).join("");
     return `
-    <div class="page-head"><div><div class="crumb"><a href="#/">Dashboard</a> › Portfolio</div><h1>Evidence library</h1>
+    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Evidence library</h1>
       <p class="muted" style="margin:0">Everything you've captured, across all activities and past jobs.</p></div>
       <div class="actions"><button class="btn" data-toast="Would rename files to Criterion_Activity_Title_Date.">Tidy file names</button><button class="btn primary" data-toast="Would open quick capture.">＋ Add evidence</button></div></div>
     ${unm.length ? `<div class="card" style="border-left:4px solid var(--gap);margin-bottom:16px;padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b>${unm.length} items aren't mapped to any criterion yet.</b><span class="small muted">${unm.map(e => esc(e.title)).join(" · ")}</span><button class="btn sm" data-ui="eUnmapped" data-val="toggle" style="margin-left:auto">${ui.eUnmapped ? "Show all" : "Show unmapped only"}</button></div>` : ""}
@@ -498,7 +524,7 @@
       ["planned", "2 Witness Statements from referees", "#/export"]
     ];
     return `
-    <div class="page-head"><div><div class="crumb"><a href="#/">Dashboard</a> › Portfolio</div><h1>Export for MTCS Online</h1>
+    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Export for MTCS Online</h1>
       <p class="muted" style="margin:0">One zip per MTCS course, laid out by upload area. You upload it to MTCS Online yourself.</p></div>
       <div class="actions"><button class="btn" data-toast="Would build the print pack: Sign-off and Record of Witness, pre-filled for ink.">Print pack for ink signatures</button><button class="btn primary" disabled style="opacity:.55;cursor:not-allowed" title="Available when the checklist is complete">Build zip</button></div></div>
     <div class="seg" style="margin-bottom:16px"><button class="on">G2 Surveyor course</button><button data-toast="Would switch to the G2 Core course export.">G2 Core course</button></div>
@@ -538,7 +564,7 @@
         ${p.status === "active" ? `<div class="small">${COMPS.length} competences · ${CRITS.length} criteria · packs/${esc(p.file)}</div>` : `<div class="small">Criteria not loaded yet</div>`}
       </div>`).join("")}</div></div>`;
     return `
-    <div class="page-head"><div><div class="crumb"><a href="#/">Dashboard</a> › Settings</div><h1>Settings and packs</h1></div></div>
+    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Settings</div><h1>Settings and packs</h1></div></div>
     <div class="grid g-main">
       <div class="stack">
         <section class="card"><div class="card-head"><h2>Competence pack</h2><span class="right small muted">Packs are data files, so new roles and grades slot in later</span></div>
@@ -558,9 +584,131 @@
           <label class="checkline"><input type="checkbox" checked> Witnesses see task summaries only</label>
         </section>
         <section class="card"><h2>Backup</h2><p class="small muted">Keep a backup file in case the browser clears its storage (iPhones can after 7 days).</p>
-          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-toast="Would download a backup file.">Download backup</button><button class="btn" data-toast="Would restore from a backup file.">Restore</button></div></section>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn primary" href="#/backup">Backup and restore</a></div></section>
         <section class="card"><h2>Assessor training</h2><p class="small muted">Later: an assessor side to track your own Stage 2 candidates.</p><span class="pill planned">Coming later</span></section>
       </div>
+    </div>`;
+  }
+
+  // ---------- 0. Opening screen: choose your route ----------
+  function viewLanding(params) {
+    const sel = params.get("role"), selGrade = params.get("grade");
+    const t = totals();
+    const card = r => {
+      const open = sel === r.key;
+      const gkeys = Object.keys(r.grades);
+      const g = r.single ? gkeys[0] : (open && r.grades[selGrade] ? selGrade : null);
+      const anyLoaded = gkeys.some(k => r.grades[k].pack);
+      let inner = "";
+      if (open) {
+        const seg = r.single
+          ? `<div class="grade-seg single"><button class="on" aria-pressed="true" disabled>Single level</button></div><p class="tiny muted" style="margin:6px 0 0">MTCS has one level for this role.</p>`
+          : `<div class="grade-seg" role="group" aria-label="Grade">${gkeys.map(k => `<button data-href="#/?role=${r.key}&grade=${k}" aria-pressed="${k === g}" class="${k === g ? "on" : ""}">${k === "Senior" ? "Senior" : k}${r.grades[k].pack ? "" : `<span class="soon">soon</span>`}</button>`).join("")}</div>`;
+        let summary = `<p class="small muted" style="margin:10px 0 0">Pick the grade you're working towards.</p>`;
+        if (g) {
+          const G = r.grades[g];
+          summary = `<div class="route-summary">
+            <div class="tiny muted" style="text-transform:uppercase;letter-spacing:.06em">Your route</div>
+            <div class="rs-title">${esc(routeName(r, g))} <span class="plus">+</span> ${esc(coreName(r, g))}</div>
+            <p class="small" style="margin:6px 0 10px">${r.single ? "Core competences apply to every route. Which Core unit goes with this role still needs confirming with MTCS." : `The matching <b>${g} Core</b> unit (C1–C3) is added automatically. Core is shared by every role at ${g}, so you only do it once.`}</p>
+            <div class="rs-meta"><span class="pill info">GA course ${G.course}</span>${r.single ? "" : `<span class="pill info">Core course ${CORE_COURSE[g]}</span>`}${G.pack ? `<span class="pill signed">Criteria loaded: ${COMPS.length} competences, ${CRITS.length} criteria</span>` : `<span class="pill warn">Coming soon: criteria pack not loaded</span>`}</div>
+            ${G.note ? `<p class="tiny muted" style="margin:6px 0 0">${esc(G.note)}</p>` : ""}
+            <button class="btn primary block lg" data-open="${r.key}|${g}" style="margin-top:12px">${G.pack ? "Open portfolio →" : "Open layout preview →"}</button>
+          </div>`;
+        }
+        inner = `<div class="role-body">${seg}${summary}</div>`;
+      }
+      return `<section class="role-card${open ? " open" : ""}">
+        <button class="role-head" data-href="${open ? "#/?role=" : "#/?role=" + r.key}" aria-expanded="${open}">
+          <span class="role-ico" aria-hidden="true">${r.ico}</span>
+          <span class="grow"><b>${esc(r.name)}</b><span class="small muted">${esc(r.blurb)}</span>
+            <span class="tiny muted">${r.single ? "Single level" : "G2 · G1 · Senior"}</span></span>
+          ${anyLoaded ? `<span class="pill signed">Available</span>` : `<span class="pill planned">Coming soon</span>`}
+          <span class="chev" aria-hidden="true">${open ? "▴" : "▾"}</span>
+        </button>${inner}</section>`;
+    };
+    return `<div class="landing">
+      <div class="landing-hero"><div class="small" style="opacity:.85">Saturday 17 October 2026 · Hi Aidan</div>
+        <h1>Choose your MTCS route</h1>
+        <p style="margin:4px 0 0;opacity:.92">Tap your role, then pick the grade you're working on. The matching Core competences are included automatically.</p></div>
+
+      <section class="card my-ports"><div class="card-head"><h2>My portfolios</h2><span class="right small muted">1 in progress</span></div>
+        <div class="port-row">
+          <div class="role-ico sm" aria-hidden="true">🧭</div>
+          <div class="grow"><b>G2 Surveyor + G2 Core</b><div class="small muted">In progress · ${t.signed} of ${CRITS.length} criteria signed · Activity 2 with assessor</div>
+            <div class="bar" style="margin-top:6px"><span class="s" style="width:${100 * t.signed / CRITS.length}%"></span><span class="m" style="width:${100 * t.mapped / CRITS.length}%"></span></div></div>
+          <button class="btn primary" data-open="surveyor|G2">Open</button>
+        </div>
+        <p class="tiny muted" style="margin:10px 0 0">You can keep more than one route, for example G2 Surveyor now and G1 later. Each has its own activities and evidence.</p>
+      </section>
+
+      <h2 class="landing-h2">Start or switch route</h2>
+      <div class="role-list">${ROLES.map(card).join("")}</div>
+
+      <section class="card import-card"><div class="card-head"><span class="imp-ico" aria-hidden="true">⤒</span><h2>Lost your data? Import a backup</h2></div>
+        <p class="small" style="margin:0 0 6px">Your portfolio is stored <b>in this browser on this device</b>. If the browser data is cleared, or you move to a new phone or laptop, import your backup <b>.zip</b> and everything is restored: routes, activities, evidence, signatures and settings.</p>
+        <div class="btn-row"><button class="btn primary" data-toast="Not connected yet – layout only. Would open the file picker for a backup .zip.">⤒ Import backup (.zip)</button><button class="btn" data-toast="Not connected yet – layout only. Would list backups in Google Drive.">From Google Drive</button><button class="btn" data-toast="Not connected yet – layout only. Would list backups in OneDrive.">From OneDrive</button></div>
+        <a class="small" href="#/backup">Backup and restore options →</a>
+      </section>
+      <p class="tiny muted" style="text-align:center;margin-top:18px">Layout prototype. Sample data only. Nothing is saved or sent.</p>
+    </div>`;
+  }
+
+  // ---------- 10. Backup and restore ----------
+  function viewBackup() {
+    const NC = "Not connected yet – layout only.";
+    const opt = (ico, title, sub, status, btn, extra, cls) => `<div class="opt-tile ${cls || ""}"><div class="opt-top"><span class="opt-ico" aria-hidden="true">${ico}</span><div class="grow"><b>${title}</b><div class="small muted">${sub}</div></div></div>
+      <div class="opt-status small">${status}</div>
+      <button class="btn ${cls === "device" ? "primary" : ""} block lg" data-toast="${NC}${extra ? " " + extra : ""}">${btn}</button></div>`;
+    return `
+    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Backup and restore</h1>
+      <p class="muted" style="margin:0">Your portfolio lives in this browser on this device. Keep a backup so nothing is lost if the browser data is cleared or the phone is replaced.</p></div></div>
+
+    <section class="card status-card"><div class="st-row"><span class="st-dot ok" aria-hidden="true"></span><div class="grow"><b>Last backup: ${LAST_BACKUP}</b><div class="small muted">Saved to this device as MTCS_Backup_2026-10-17_1642.zip · 48 MB · 124 items</div></div>
+      <button class="btn primary" data-toast="${NC} Would back up to every place switched on below.">Back up now</button></div></section>
+
+    <h2 class="sec-h">Back up to</h2>
+    <div class="opt-grid">
+      ${opt("📱", "Save to this device (.zip)", "Downloads a single backup file you can keep, copy or email to yourself", `<span class="pill signed">Last saved ${LAST_BACKUP}</span>`, "⤓ Save backup to this device (.zip)", "Would download MTCS_Backup_[date].zip to Downloads.", "device")}
+      ${opt("🟢", "Google Drive", "Saves into a folder you choose, e.g. MTCS Portfolio/Backups", `<span class="pill planned">Not connected</span>`, "Connect and back up to Google Drive", "Would ask you to sign in to Google.")}
+      ${opt("🔵", "OneDrive", "Saves into your OneDrive, e.g. Documents/MTCS Backups", `<span class="pill planned">Not connected</span>`, "Connect and back up to OneDrive", "Would ask you to sign in to Microsoft.")}
+    </div>
+
+    <h2 class="sec-h">Restore</h2>
+    <section class="card restore-card">
+      <p class="small" style="margin:0 0 10px"><b>Importing a backup restores everything</b> into this browser: routes, activities, evidence files, assessor and witness signatures with their audit trail, and settings. You'll see what's in the backup before anything is replaced.</p>
+      <div class="opt-grid">
+        <button class="restore-tile primary" data-toast="${NC} Would open the file picker for a backup .zip."><span class="opt-ico" aria-hidden="true">⤒</span><span><b>Restore from local zip</b><span class="small">Pick a backup .zip from this device</span></span></button>
+        <button class="restore-tile" data-toast="${NC} Would list backups in Google Drive."><span class="opt-ico" aria-hidden="true">🟢</span><span><b>Restore from Google Drive</b><span class="small muted">Choose a backup from Drive</span></span></button>
+        <button class="restore-tile" data-toast="${NC} Would list backups in OneDrive."><span class="opt-ico" aria-hidden="true">🔵</span><span><b>Restore from OneDrive</b><span class="small muted">Choose a backup from OneDrive</span></span></button>
+      </div>
+      <p class="tiny muted" style="margin:10px 0 0">Restoring replaces what's in this browser. Back up first if you want to keep the current data.</p>
+    </section>
+
+    <div class="grid g-2" style="margin-top:16px">
+      <section class="card"><div class="card-head"><h2>Automatic backup</h2>
+        <label class="switch right"><input type="checkbox" checked><span class="slider" aria-hidden="true"></span><span class="sr-only">Automatic backup</span></label></div>
+        <div class="field"><label for="bf">How often</label><select id="bf"><option>Daily</option><option>After every change</option><option>Weekly</option><option>Only when I tap Back up now</option></select></div>
+        <div class="field"><label for="bd">Where</label><select id="bd"><option>This device (.zip)</option><option>Google Drive</option><option>OneDrive</option><option>All connected places</option></select></div>
+        <div class="field"><label for="bk">Keep</label><select id="bk"><option>Last 5 backups</option><option>Last 10 backups</option><option>All backups</option></select></div>
+        <label class="checkline"><input type="checkbox" checked> Only on Wi-Fi (saves offshore data allowance)</label>
+        <label class="checkline"><input type="checkbox"> Remind me if there's no backup for 7 days</label>
+      </section>
+      <section class="card"><h2>What's in a backup</h2>
+        <ul class="list small">
+          <li><span>✅</span><div class="grow">Routes and activities, plans, codes and notes</div></li>
+          <li><span>✅</span><div class="grow">Evidence files (photos, logs, written products)</div></li>
+          <li><span>✅</span><div class="grow">Signatures and the audit trail</div></li>
+          <li><span>✅</span><div class="grow">Settings and the loaded criteria packs</div></li>
+        </ul>
+        <p class="tiny muted">The backup holds your evidence, so keep it somewhere private. Check that client data is allowed to leave the vessel before backing up to the cloud.</p>
+        <h3 style="margin-top:12px">Recent backups</h3>
+        <ul class="list small">
+          <li><span>📱</span><div class="grow">Today 16:42 · this device<div class="tiny muted">48 MB</div></div><button class="btn sm" data-toast="${NC}">Restore</button></li>
+          <li><span>📱</span><div class="grow">16 Oct 23:58 · this device<div class="tiny muted">46 MB</div></div><button class="btn sm" data-toast="${NC}">Restore</button></li>
+          <li><span>📱</span><div class="grow">15 Oct 23:57 · this device<div class="tiny muted">45 MB</div></div><button class="btn sm" data-toast="${NC}">Restore</button></li>
+        </ul>
+      </section>
     </div>`;
   }
 
@@ -594,10 +742,11 @@
     el.textContent = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => el.remove(), 2600);
   }
   document.addEventListener("click", e => {
-    const t = e.target.closest("[data-href],[data-toast],[data-ui],[data-pick],[data-yn],[data-jump]");
+    const t = e.target.closest("[data-href],[data-toast],[data-ui],[data-pick],[data-yn],[data-jump],[data-open]");
     if (!t) return;
     if (t.dataset.jump) { e.preventDefault(); document.getElementById(t.dataset.jump).scrollIntoView({ behavior: "smooth", block: "start" });
       t.parentElement.querySelectorAll("a").forEach(x => x.classList.toggle("on", x === t)); return; }
+    if (t.dataset.open) { const [r, g] = t.dataset.open.split("|"); ui.active = { role: r, grade: g }; if (location.hash === "#/dashboard") render(); else location.hash = "#/dashboard"; return; }
     if (t.dataset.href) { e.preventDefault(); location.hash = t.dataset.href; return; }
     if (t.dataset.toast) { e.preventDefault(); toast(t.dataset.toast); return; }
     if (t.dataset.pick) { t.parentElement.querySelectorAll("button").forEach(b => b.classList.toggle("on", b === t)); return; }
@@ -616,6 +765,6 @@
     ui[k] = e.target.value; const pos = e.target.selectionStart; render();
     const el = document.querySelector(`[data-ui-input="${k}"]`); if (el) { el.focus(); el.setSelectionRange(pos, pos); }
   });
-  window.addEventListener("hashchange", () => { const keep = /[?&](c|modal)=/.test(location.hash); const y = window.scrollY; render(); if (keep) window.scrollTo(0, y); else window.scrollTo(0, 0); });
+  window.addEventListener("hashchange", () => { const keep = /[?&](c|modal|role)=/.test(location.hash); const y = window.scrollY; render(); if (keep) window.scrollTo(0, y); else window.scrollTo(0, 0); });
   render();
 })();
