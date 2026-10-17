@@ -193,6 +193,7 @@
     });
     const items = nextItems();
     return `
+    <h1 class="sr-only">Dashboard</h1>
     ${backupNudge()}
     <div class="dash-head">${ctxChip()}<div class="actions"><button class="btn sm" data-toast="Quick capture would open the camera or file picker.">＋ Add evidence</button></div></div>
 
