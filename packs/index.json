@@ -1,0 +1,16 @@
+{
+  "note": "Catalogue of competence packs. Only active packs have a data file. Others are placeholders so the UI can show them as 'coming later'. Course ids are MTCS Online GA course ids (research notes, Oct 2026).",
+  "packs": [
+    {"id": "g2-surveyor-2026", "role": "Surveyor", "grade": "G2", "label": "G2 Surveyor (+ G2 Core)", "status": "active", "file": "g2-surveyor-2026.json", "gaCourse": 1844},
+    {"id": "g1-surveyor", "role": "Surveyor", "grade": "G1", "label": "G1 Surveyor (+ G1 Core)", "status": "later", "gaCourse": 1833, "note": "14 competences, about 84 criteria"},
+    {"id": "snr-surveyor", "role": "Surveyor", "grade": "Senior", "label": "Senior Surveyor", "status": "later", "gaCourse": 1823},
+    {"id": "g2-survey-engineer", "role": "Survey Engineer", "grade": "G2", "label": "G2 Survey Engineer", "status": "later", "gaCourse": 1843},
+    {"id": "g1-survey-engineer", "role": "Survey Engineer", "grade": "G1", "label": "G1 Survey Engineer", "status": "later", "gaCourse": 1832},
+    {"id": "snr-survey-engineer", "role": "Survey Engineer", "grade": "Senior", "label": "Senior Survey Engineer", "status": "later", "gaCourse": 1822},
+    {"id": "g2-data-processor", "role": "Data Processor", "grade": "G2", "label": "G2 Data Processor", "status": "later", "gaCourse": 1834},
+    {"id": "g1-data-processor", "role": "Data Processor", "grade": "G1", "label": "G1 Data Processor", "status": "later", "gaCourse": 1824},
+    {"id": "snr-data-processor", "role": "Data Processor", "grade": "Senior", "label": "Senior Data Processor", "status": "later", "gaCourse": 1816},
+    {"id": "party-chief", "role": "Survey Party Chief", "grade": "Single level", "label": "Survey Party Chief", "status": "later", "gaCourse": 1846},
+    {"id": "client-rep", "role": "Client Representative", "grade": "Single level", "label": "Client Representative", "status": "later", "gaCourse": 1809}
+  ]
+}
