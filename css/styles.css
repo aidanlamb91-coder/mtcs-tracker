@@ -463,3 +463,21 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .tpl-acts .btn{min-height:36px}
 .tpl-item .fname{word-break:normal;overflow-wrap:anywhere}
 .tpl-item .unit-pill{align-self:flex-start;margin-top:4px}
+
+/* ---------- Evidence honesty + forms packs ---------- */
+.sample-note{display:flex;gap:10px;background:var(--brand-soft);border:1px solid #cfe3e8;color:var(--ink-2);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:.86rem}
+.sample-note.slim{margin:0 0 8px;padding:8px 10px;font-size:.8rem}
+.pack-banner{display:flex;gap:12px;align-items:center;background:#fff;border:1px solid #cfe3e8;border-left:4px solid var(--brand);border-radius:12px;padding:12px 14px;margin-top:16px;box-shadow:var(--shadow);flex-wrap:wrap}
+.settings .pack-banner,.card .pack-banner{margin-top:0;box-shadow:none}
+.pack-banner .grow{flex:1;min-width:200px}
+.pb-ico{width:32px;height:32px;border-radius:9px;background:var(--brand-soft);display:grid;place-items:center;flex:none}
+.pack-grid{margin-bottom:4px}
+.pack-card .card-head h2{font-size:1.02rem}
+.pack-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.pack-steps li{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}
+.pack-steps .grow{flex:1;min-width:180px}
+.pack-steps .btn{min-height:40px}
+.pack-status{border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.pack-status.not-imported{background:var(--warn-bg);border:1px solid #f0dfa6;color:var(--warn)}
+.pack-example{display:flex;gap:10px;align-items:flex-start;background:#f3f5f8;border:1.5px dashed #b7c0cd;border-radius:12px;padding:12px 14px;margin-top:14px;color:var(--ink-2)}
+.pack-example .pill{flex:none;margin-top:2px}

@@ -67,8 +67,11 @@
   const MP = window.MTCS_PAGES || {};
   const MTCS_NOTE = "Official forms are © MTCS Ltd. Download the current versions from MTCS.";
   const tplFind = (unit, kind, comp) => TPL.find(t => t.unit === unit && t.kind === kind && (comp == null || t.comp === comp));
+  const packCount = k => TPL.filter(t => t.pack === k).length;
+  const PACK_STATE = "not-imported"; // layout sample only; nothing is imported or stored yet
+  const packBanner = (where) => `<div class="pack-banner" role="note"><span class="pb-ico" aria-hidden="true">🧰</span><div class="grow"><b>Forms pack: not imported yet</b><div class="small muted">Download the current pack from MTCS when you start compiling your portfolio, then import it here. The app uses those blank templates throughout. A weekly check can flag "pack update available" if MTCS publishes a newer revision.</div></div><a class="btn sm primary" href="#/forms">Get the forms pack</a></div>`;
   const tplLink = (t, label, tag) => t ? `<div class="tpl-item"><span class="tpl-ico" aria-hidden="true">📄</span><span class="grow"><b>${esc(label || t.label)}</b><span class="fname">${esc(t.file)}${t.mtcsType === "zip" ? " (inside the MTCS ‘All Files’ zip)" : ""}</span>${tag || ""}
-      <span class="tpl-acts">${t.mtcsUrl ? `<a class="btn sm primary" href="${esc(t.mtcsUrl)}" target="_blank" rel="noopener" title="Opens MTCS Online in a new tab">Download from MTCS ↗</a>` : `<a class="btn sm primary" href="${esc((MP[t.pack] || MP["g2-surveyor"] || {}).url || "")}" target="_blank" rel="noopener">Download from MTCS ↗</a>`}<button class="btn sm" data-toast="Layout only. Later you'll pick the PDF you downloaded and it's kept in this browser.">Add my downloaded copy</button></span></span></div>` : "";
+      <span class="tpl-acts">${t.pack && t.pack.startsWith("g2-") ? `<span class="pill planned">Included in pack</span>` : ""}${t.mtcsUrl ? `<a class="btn sm primary" href="${esc(t.mtcsUrl)}" target="_blank" rel="noopener" title="Opens MTCS Online in a new tab">Download from MTCS ↗</a>` : `<a class="btn sm primary" href="${esc((MP[t.pack] || MP["g2-surveyor"] || {}).url || "")}" target="_blank" rel="noopener">Download from MTCS ↗</a>`}<button class="btn sm" data-toast="Layout only. Later you'll pick the PDF you downloaded and it's kept in this browser.">Add my downloaded copy</button></span></span></div>` : "";
   const shortLabel = txt => { const s = txt.replace(/^(Demonstrates|Has demonstrated|Has)\s+(the ability to|an understanding of|a basic understanding of|a good understanding of|a willingness to|knowledge of|an awareness of|the correct usage of)?\s*/i, ""); return s.charAt(0).toUpperCase() + s.slice(1); };
   const DISCLAIMER = `<footer class="disclaimer">Prototype for discussion. Not affiliated with or endorsed by MTCS or IMarEST. Sample data only. Official forms are © MTCS Ltd. Download the current versions from MTCS.</footer>`;
 
@@ -200,6 +203,7 @@
     <section class="card next-card"><div class="card-head"><h2>What's next</h2><span class="right pill info">${items.length}</span></div>
       <div class="next-list">${items.map(i => `<a class="next-row" href="${i.href}"><span class="dot" style="background:${DOT[i.st]}"></span><span class="grow"><b>${esc(i.t)}</b><span class="small muted">${esc(i.s)}</span></span><span class="chev" aria-hidden="true">›</span></a>`).join("")}</div>
     </section>
+    ${packBanner("dashboard")}
 
     <div class="grid g-3" style="margin-top:16px">
       <section class="card"><div class="card-head"><h2>Readiness</h2><span class="right small muted">${n} criteria</span></div>
@@ -320,7 +324,8 @@
       </section>
 
       <section class="card ag-forms"><div class="card-head"><h2>Blank MTCS forms</h2><a class="right btn sm ghost" href="#/forms">All forms →</a></div>
-        <p class="tiny muted" style="margin:0 0 8px">${MTCS_NOTE} One plan and one feedback form per unit for this activity.</p>
+        <p class="tiny muted" style="margin:0 0 8px">These come from your imported forms pack (Forms and templates). Not imported yet in this sample. The links below are for one-off downloads from MTCS. ${MTCS_NOTE}</p>
+        <a class="btn sm primary" href="#/forms" style="margin-bottom:8px">Open forms pack</a>
         <div class="tpl-list">
           ${f("surveyor", "plan", "Assessment Plan – G2 Surveyor")}${f("core", "plan", "Assessment Plan – G2 Core")}
           ${f("surveyor", "feedback", "Feedback Form – G2 Surveyor")}${f("core", "feedback", "Feedback Form – G2 Core")}
@@ -336,7 +341,7 @@
       <div class="grow"><b class="small">${esc(e.title)}</b>${e.redact ? ` <span class="pill warn">Check for client data</span>` : ""}
         <div class="fname">${esc(e.file)}</div>
         <div>${e.criteria.map(c => `<a class="ev-chip" href="${here()}?c=${c}">${c}</a>`).join("") || `<span class="pill gap" style="margin-top:6px">Unmapped</span>`}</div></div>
-      <div style="text-align:right">${e.code ? `<span class="code" style="background:var(--brand-soft);color:var(--brand)" title="Evidence type">${e.code}</span>` : ""}<div class="tiny muted" style="margin-top:4px">${esc(e.date)}</div></div></li>`;
+      <div style="text-align:right">${e.code ? `<span class="code" style="background:var(--brand-soft);color:var(--brand)" title="Evidence type">${e.code}</span>` : ""}<div class="tiny muted" style="margin-top:4px">${esc(e.date)}</div><button class="btn sm ghost" data-toast="Layout only: no preview yet. Sample item: no file attached yet.">View</button></div></li>`;
   }
 
 
@@ -423,6 +428,7 @@
         <h3 style="margin-top:18px">By activity</h3>
         <div class="table-wrap"><table><thead><tr><th>Activity</th><th>Code</th><th>Status</th><th>Assessor</th></tr></thead><tbody>${actRows}</tbody></table></div>
         <h3 style="margin-top:18px">Linked evidence (${ev.length})</h3>
+        <div class="sample-note slim"><span aria-hidden="true">ℹ️</span><div><b>Sample data:</b> in the real app each item is a real file stored in this browser, and previews here. These sample items have no file attached yet.</div></div>
         <ul class="list">${ev.map(evRow).join("") || `<li class="small muted">No evidence linked yet.</li>`}</ul>
         <h3 style="margin-top:18px">Assessor notes</h3>
         <div class="field"><textarea readonly>${st === "signed" ? "Observed during set-up checks. Candidate explained each step clearly." : ""}</textarea></div>
@@ -447,10 +453,12 @@
       <td>${e.code ? `<span class="code" style="background:var(--brand-soft);color:var(--brand)">${e.code}</span>` : "–"}</td>
       <td>${e.criteria.map(c => `<a class="ev-chip" href="${here()}?c=${c}">${c}</a>`).join("") || `<span class="pill gap">Unmapped</span>`}</td>
       <td>${e.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}${e.redact ? `<span class="pill warn">Check client data</span>` : ""}</td>
-      <td class="small" style="white-space:nowrap">${esc(e.date)}</td></tr>`).join("");
+      <td class="small" style="white-space:nowrap">${esc(e.date)}</td>
+      <td><button class="btn sm" data-toast="Layout only: no preview yet. Sample item: no file attached yet.">Preview</button><div class="tiny muted" style="margin-top:3px">No file attached yet</div></td></tr>`).join("");
     return `
     <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Evidence library</h1>
       <p class="muted" style="margin:0">Everything you've captured, across all activities and past jobs.</p></div>
+    <div class="sample-note" role="note"><span aria-hidden="true">ℹ️</span><div><b>Sample data:</b> in the real app each item is a real file stored in this browser, and previews here. In this prototype the items below are labels only, so Preview says "No file attached yet".</div></div>
       <div class="actions"><button class="btn" data-toast="Would rename files to Criterion_Activity_Title_Date.">Tidy file names</button><button class="btn primary" data-toast="Would open quick capture.">＋ Add evidence</button></div></div>
     ${unm.length ? `<div class="card" style="border-left:4px solid var(--gap);margin-bottom:16px;padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b>${unm.length} items aren't mapped to any criterion yet.</b><span class="small muted">${unm.map(e => esc(e.title)).join(" · ")}</span><button class="btn sm" data-ui="eUnmapped" data-val="toggle" style="margin-left:auto">${ui.eUnmapped ? "Show all" : "Show unmapped only"}</button></div>` : ""}
     <div class="filters">
@@ -460,8 +468,8 @@
       <label class="checkline"><input type="checkbox" data-ui="eUnmapped" data-val="toggle" ${ui.eUnmapped ? "checked" : ""}> Unmapped only</label>
     </div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Item</th><th>Type</th><th>Activity</th><th>Code</th><th>Criteria</th><th>Tags</th><th>Date</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="7" class="muted">Nothing matches.</td></tr>`}</tbody></table></div>
+      <thead><tr><th>Item</th><th>Type</th><th>Activity</th><th>Code</th><th>Criteria</th><th>Tags</th><th>Date</th><th>File</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="8" class="muted">Nothing matches.</td></tr>`}</tbody></table></div>
     <p class="small muted">Codes are the evidence type the item supports (O, P, W, Q). The assessor's final code for each criterion is set on the competence sheet.</p>`;
   }
 
@@ -645,6 +653,10 @@
           <div class="rs-title">${esc(routeName(ar, ui.active.grade))} <span class="plus">+</span> ${esc(coreName(ar, ui.active.grade))}</div>
           <div class="rs-meta" style="margin-top:8px"><span class="pill info">GA course ${G.course}</span>${ar.single ? "" : `<span class="pill info">Core course ${CORE_COURSE[ui.active.grade]}</span>`}${G.pack ? `<span class="pill signed">Criteria loaded: ${COMPS.length} competences, ${CRITS.length} criteria</span>` : `<span class="pill warn">Criteria pack not loaded yet</span>`}</div>
         </section>
+        <section class="card"><div class="card-head"><h2>Forms pack</h2><a class="right btn sm" href="#/forms">Forms and templates</a></div>
+          ${packBanner("settings")}
+          <p class="tiny muted" style="margin:8px 0 0">Stored originals stay unchanged. Filled copies are saved separately in your portfolio (later, when wired).</p>
+        </section>
         <section class="card"><div class="card-head"><h2>Competence packs</h2><span class="right small muted hide-sm">Packs are data files, so new roles and grades slot in later</span></div>
           ${roles.map(roleBlock).join("")}
         </section>
@@ -692,10 +704,32 @@
     const row = t => `<li>${tplLink(t, null, `<span class="pill ${t.both ? "signed" : t.unit === "core" ? "info" : "planned"} unit-pill">${t.both ? "Both units" : t.unit === "core" ? "G2 Core" : "G2 Surveyor"}</span>`)}</li>`;
     const dedupe = list => { const seen = {}; return list.filter(t => { if (seen[t.sha256]) { seen[t.sha256].both = true; return false; } seen[t.sha256] = t; return true; }); };
     const byArea = n => dedupe(TPL.filter(t => t.area === n && t.kind !== "readme").map(t => Object.assign({}, t)));
+    const packCard = (key, title, zipName) => { const P = MP[key] || {}; return `<section class="card pack-card">
+      <div class="card-head"><span class="imp-ico" aria-hidden="true">🗜️</span><h2>${title}</h2><span class="right pill planned">${packCount(key)} files</span></div>
+      <div class="fname" style="margin-bottom:10px">${zipName}</div>
+      <ol class="pack-steps">
+        <li><span class="step">1</span><div class="grow"><b>Download pack from MTCS</b><div class="small muted">Opens MTCS Online in a new tab and saves the zip from MTCS to this device.</div></div><a class="btn primary" href="${esc(P.zip || "")}" target="_blank" rel="noopener">Download pack from MTCS ↗</a></li>
+        <li><span class="step">2</span><div class="grow"><b>Import downloaded pack (.zip)</b><div class="small muted">Pick that same zip. The app unpacks it in this browser (layout only here).</div></div><button class="btn" data-toast="Layout only: no file is read or stored yet. Later you'd pick the zip you just downloaded.">Import downloaded pack (.zip)</button></li>
+        <li><span class="step">3</span><div class="grow"><b>Status</b><div class="pack-status not-imported"><b>Forms pack: not imported yet</b><span class="small">Download at portfolio start, then import above.</span></div></div></li>
+      </ol>
+      <p class="tiny muted" style="margin:8px 0 0">Stored originals stay unchanged; filled copies are saved separately in your portfolio.</p>
+    </section>`; };
     return `
     <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Forms and templates</h1>
-      <p class="muted" style="margin:0">${MTCS_NOTE} Each button opens the form on MTCS Online (free, no login needed for these files). Fill it in on the official PDF.</p>
-      <div class="btn-row">${["g2-surveyor", "g2-core"].filter(k => MP[k]).map(k => `<a class="btn" href="${esc(MP[k].url)}" target="_blank" rel="noopener">${k === "g2-core" ? "Grade II Core page" : "Grade II Surveyor page"} on MTCS Online ↗</a><a class="btn" href="${esc(MP[k].zip)}" target="_blank" rel="noopener">${k === "g2-core" ? "G2 Core" : "G2 Surveyor"} all files (.zip) ↗</a>`).join("")}${MP.howTo ? `<a class="btn ghost" href="${esc(MP.howTo.url)}" target="_blank" rel="noopener">How MTCS says to get the forms ↗</a>` : ""}</div></div></div>
+      <p class="muted" style="margin:0">${MTCS_NOTE}</p>
+      <p class="small" style="margin:8px 0 0">At the start of compiling your portfolio, download the current pack once. The app then uses those blank templates throughout, and a weekly check can flag "pack update available" if MTCS publishes a newer revision.</p></div></div>
+
+    <div class="grid g-2 pack-grid">
+      ${packCard("g2-surveyor", "G2 Surveyor – All Files.zip", "G2Surveyor - All Files.zip")}
+      ${packCard("g2-core", "G2 Core – All Files.zip", "G2CoreComp - All Files.zip")}
+    </div>
+
+    <div class="pack-example" role="note"><span class="pill planned">Example</span><div class="small"><b>How the status will look once imported (sample only, not your data):</b><br>
+      Imported 12 Oct 2026 · ${packCount("g2-surveyor")} files · Pack rev: MTCS 2026 forms · Last update check 17 Oct 2026 · <b>Up to date</b>. If MTCS publishes a newer pack, this banner shows <b>"Update available"</b> instead.</div></div>
+
+    <p class="small muted" style="margin:14px 2px">Prefer forms one at a time? Each form below still has a "Download from MTCS" link. ${MP.howTo ? `<a href="${esc(MP.howTo.url)}" target="_blank" rel="noopener">How MTCS says to get the forms ↗</a>` : ""}</p>
+
+    <h2 class="sec-h">Forms in the packs</h2>
     <div class="stack">
       <section class="card"><div class="card-head"><h2>Start here</h2></div><ul class="list tpl-ul">
         ${dedupe(TPL.filter(t => t.kind === "readme").map(t => Object.assign({}, t))).map(row).join("")}${TPL.filter(t => t.kind === "guidance").map(t => `<li>${tplLink(t, null, `<span class="pill planned unit-pill">MTCS guidance</span>`)}</li>`).join("")}</ul></section>
