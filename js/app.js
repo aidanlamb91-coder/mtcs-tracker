@@ -1,1037 +1,282 @@
-/* MTCS Portfolio Tracker: layout prototype. Front end only, sample data, hash routing. */
-(function () {
-  "use strict";
-  const S = window.SAMPLE;
-  const PACK = window.PACKS[S.candidate.packId];
-  const app = document.getElementById("app");
-  const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-
-  // ---------- Pack helpers ----------
-  const COMPS = [];
-  const CRITS = [];
-  PACK.units.forEach(u => u.competences.forEach(c => {
-    const comp = Object.assign({}, c, { unitName: u.name, unitId: u.id });
-    COMPS.push(comp);
-    c.criteria.forEach(k => CRITS.push(Object.assign({}, k, { comp })));
-  }));
-  const critById = id => CRITS.find(c => c.id === id);
-  const compLabel = c => (c.unitId === "core" ? "Core " : "Surveyor ") + c.number;
-  const cov = (id, a) => (S.coverage[id] || {})[a];
-  const RANK = { gap: 0, planned: 1, mapped: 2, signed: 3 };
-  function critState(id) {
-    let best = "gap";
-    [1, 2, 3].forEach(a => { const c = cov(id, a); if (c && RANK[c.state] > RANK[best]) best = c.state; });
-    return best;
-  }
-  const here = () => (location.hash.split("?")[0] || "#/dashboard");
-  const evFor = id => S.evidence.filter(e => e.criteria.includes(id));
-  const actOf = n => S.activities.find(a => a.n === Number(n));
-  function compStats(comp) {
-    const r = { signed: 0, mapped: 0, planned: 0, gap: 0, total: comp.criteria.length, acts: 0 };
-    comp.criteria.forEach(k => r[critState(k.id)]++);
-    [1, 2, 3].forEach(a => { if (comp.criteria.some(k => cov(k.id, a))) r.acts++; });
-    return r;
-  }
-  function totals() {
-    const t = { signed: 0, mapped: 0, planned: 0, gap: 0 };
-    CRITS.forEach(k => t[critState(k.id)]++);
-    let direct = 0, indirect = 0;
-    CRITS.forEach(k => [1, 2, 3].forEach(a => { const c = cov(k.id, a); if (!c) return; if ("OP".includes(c.code)) direct++; else if ("WQ".includes(c.code)) indirect++; }));
-    t.directPct = Math.round(100 * direct / (direct + indirect));
-    t.direct = direct; t.indirect = indirect;
-    t.compsAll3 = COMPS.filter(c => compStats(c).acts === 3).length;
-    return t;
-  }
-  const STATE_LABEL = { signed: "Signed", mapped: "Evidenced", planned: "Planned", gap: "Gap" };
-  const pill = st => `<span class="pill ${st}">${STATE_LABEL[st]}</span>`;
-  const codeBadge = (code, st) => `<span class="code" style="background:${st === "signed" ? "var(--signed-bg)" : st === "mapped" ? "var(--mapped-bg)" : "#eef1f5"}">${esc(code)}</span>`;
-  const EV_ICON = { photo: "📷", file: "📄", written: "✍️", witness: "🧾", record: "✅" };
-  const EV_TYPE = { photo: "Photo", file: "File", written: "Written product", witness: "Witness statement", record: "Work record" };
-
-  // ---------- Routes (role + grade, Core added automatically) ----------
-  // GA course ids from research notes (Oct 2026). Only G2 Surveyor has a loaded criteria pack.
-  const CORE_COURSE = { G2: 228, G1: 227, Senior: 213 };
-  const ROLES = [
-    { key: "surveyor", name: "Surveyor", ico: "🧭", blurb: "Online and offshore survey operations", grades: { G2: { pack: "g2-surveyor-2026", course: 1844 }, G1: { course: 1833, note: "About 14 competences, 84 criteria" }, Senior: { course: 1823 } } },
-    { key: "engineer", name: "Survey Engineer", ico: "🔧", blurb: "Survey equipment, mobilisation and fault finding", grades: { G2: { course: 1843 }, G1: { course: 1832 }, Senior: { course: 1822 } } },
-    { key: "processor", name: "Data Processor", ico: "🗺️", blurb: "Processing, QC and charting of survey data", grades: { G2: { course: 1834 }, G1: { course: 1824 }, Senior: { course: 1816 } } },
-    { key: "partychief", name: "Party Chief", ico: "🧑‍✈️", blurb: "Leading the survey team offshore", single: true, grades: { "Single level": { course: 1846 } } },
-    { key: "clientrep", name: "Client Representative", ico: "🤝", blurb: "Representing the client on site", single: true, grades: { "Single level": { course: 1809 } } }
-  ];
-  const roleOf = k => ROLES.find(r => r.key === k);
-  const routeName = (r, g) => r.single ? r.name : `${g} ${r.name}`;
-  const coreName = (r, g) => r.single ? "Core unit to be confirmed with MTCS" : `${g} Core`;
-
-  // ---------- Official MTCS forms: listed here, downloaded from MTCS (not hosted by this site) ----------
-  const TPL = window.TEMPLATES || [];
-  const MP = window.MTCS_PAGES || {};
-  const MTCS_NOTE = "Official forms are © MTCS Ltd. Download the current versions from MTCS.";
-  const tplFind = (unit, kind, comp) => TPL.find(t => t.unit === unit && t.kind === kind && (comp == null || t.comp === comp));
-  const packCount = k => TPL.filter(t => t.pack === k).length;
-  const PACK_STATE = "not-imported"; // layout sample only; nothing is imported or stored yet
-  // --- Sample: activities shared with you as zips (no accounts, browser-local) ---
-  const SHARED = [
-    { n: 2, candidate: "[Candidate A]", route: "G2 Surveyor + G2 Core", title: "Routine online pre-trench shift", dates: "8–11 Oct 2026", status: "awaiting", statusLabel: "Awaiting review", exportedBy: "[Candidate A]", exportedAt: "15 Oct 2026, 09:14 BST", pkg: 4, basedOn: 3, app: "0.2 (layout)", criteria: 31, files: 5, progress: "Plan agreed · 0 of 31 coded" },
-    { n: 3, candidate: "[Candidate B]", route: "G2 Surveyor + G2 Core", title: "Data handover and reporting", dates: "12–14 Oct 2026", status: "ready", statusLabel: "Ready to return", exportedBy: "[Candidate B]", exportedAt: "16 Oct 2026, 18:02 BST", pkg: 2, basedOn: 1, app: "0.2 (layout)", criteria: 20, files: 3, progress: "Signed · feedback added" },
-    { n: 1, candidate: "[Candidate A]", route: "G2 Surveyor + G2 Core", title: "Set-up and calibration checks", dates: "4–7 Oct 2026", status: "imported", statusLabel: "Imported", exportedBy: "[Candidate A]", exportedAt: "17 Oct 2026, 08:40 BST", pkg: 1, basedOn: 0, app: "0.2 (layout)", criteria: 42, files: 8, progress: "Not reviewed yet" }];
-  const sharedOf = n => SHARED.find(x => x.n === Number(n)) || SHARED[0];
-  const sharedRow = x => `<a class="shared-row" href="#/shared/${x.n}"><span class="num">${x.n}</span><span class="grow"><b>Activity ${x.n} · ${esc(x.title)}</b><span class="small muted">From ${esc(x.candidate)} · ${esc(x.dates)} · Package v${x.pkg}</span><span class="small muted">${esc(x.progress)}</span></span><span class="pill ${x.status === "ready" ? "signed" : x.status === "awaiting" ? "mapped" : "planned"}">${x.statusLabel}</span><span class="chev" aria-hidden="true">›</span></a>`;
-  const packBanner = (where) => `<div class="pack-banner" role="note"><span class="pb-ico" aria-hidden="true">🧰</span><div class="grow"><b>Forms pack: not imported yet</b><div class="small muted">Download the current pack from MTCS when you start compiling your portfolio, then import it here. The app uses those blank templates throughout. A weekly check can flag "pack update available" if MTCS publishes a newer revision.</div></div><a class="btn sm primary" href="#/forms">Get the forms pack</a></div>`;
-  const tplLink = (t, label, tag) => t ? `<div class="tpl-item"><span class="tpl-ico" aria-hidden="true">📄</span><span class="grow"><b>${esc(label || t.label)}</b><span class="fname">${esc(t.file)}${t.mtcsType === "zip" ? " (inside the MTCS ‘All Files’ zip)" : ""}</span>${tag || ""}
-      <span class="tpl-acts">${t.pack && t.pack.startsWith("g2-") ? `<span class="pill planned">Included in pack</span>` : ""}${t.mtcsUrl ? `<a class="btn sm primary" href="${esc(t.mtcsUrl)}" target="_blank" rel="noopener" title="Opens MTCS Online in a new tab">Download from MTCS ↗</a>` : `<a class="btn sm primary" href="${esc((MP[t.pack] || MP["g2-surveyor"] || {}).url || "")}" target="_blank" rel="noopener">Download from MTCS ↗</a>`}<button class="btn sm" data-toast="Layout only. Later you'll pick the PDF you downloaded and it's kept in this browser.">Add my downloaded copy</button></span></span></div>` : "";
-  const shortLabel = txt => { const s = txt.replace(/^(Demonstrates|Has demonstrated|Has)\s+(the ability to|an understanding of|a basic understanding of|a good understanding of|a willingness to|knowledge of|an awareness of|the correct usage of)?\s*/i, ""); return s.charAt(0).toUpperCase() + s.slice(1); };
-  const DISCLAIMER = `<footer class="disclaimer">Prototype for discussion. Not affiliated with or endorsed by MTCS or IMarEST. Sample data only. Official forms are © MTCS Ltd. Download the current versions from MTCS.</footer>`;
-
-  // ---------- Router ----------
-  function parse() {
-    const h = location.hash.replace(/^#/, "") || "/";
-    const [path, q] = h.split("?");
-    const params = new URLSearchParams(q || "");
-    return { parts: path.split("/").filter(Boolean), params };
-  }
-  const ui = { active: { role: "surveyor", grade: "G2" }, staleBackup: false, mUnit: "all", mState: "gap", mSearch: "", mSearchOpen: false, mLegend: false, aStep: 1, eType: "all", eUnmapped: false, eSearch: "" };
-  const backupDays = () => ui.staleBackup ? 9 : 3;
-  const backupWhen = () => ui.staleBackup ? "8 Oct 23:58 (BST)" : "14 Oct 23:58 (BST)";
-
-  function render() {
-    const { parts, params } = parse();
-    const page = parts[0] || "route";
-    let role = "candidate", body = "", nav = page;
-    if (page === "assessor") { role = "assessor"; body = viewAssessor(parts[1] || 2, params); }
-    else if (page === "witness") { role = "witness"; body = viewWitness(parts[1] || 1); }
-    else if (page === "activity") { body = viewActivity(parts[1] || 1); nav = "activity" + (parts[1] || 1); }
-    else if (page === "matrix") body = viewMatrix(params);
-    else if (page === "evidence") body = viewEvidence();
-    else if (page === "export") body = viewExport();
-    else if (page === "settings") body = viewSettings();
-    else if (page === "backup") body = viewBackup();
-    else if (page === "forms") body = viewForms();
-    else if (page === "more") body = viewMore();
-    else if (page === "shared") { role = "shared"; body = viewShared(parts[1] || 2); }
-    else if (page === "route") { role = "landing"; body = viewLanding(params); }
-    else { body = viewDashboard(); nav = "dashboard"; }
-
-    const ar = roleOf(ui.active.role);
-    const preview = role === "candidate" && !ar.grades[ui.active.grade].pack
-      ? `<div class="preview-banner" role="note"><b>${esc(routeName(ar, ui.active.grade))}: criteria pack not loaded yet (layout preview).</b> The screens below show the G2 Surveyor sample so you can see the layout. <a href="#/">Change route</a></div>` : "";
-    const shell = role === "candidate"
-      ? `<div class="shell">${sidenav(nav)}<main id="main">${preview}${body}${DISCLAIMER}</main></div>${bottomnav(nav)}`
-      : role === "landing" ? `<main id="main" class="landing-main">${body}${DISCLAIMER}</main>`
-      : `<main id="main" class="link-main">${body}${DISCLAIMER}</main>`;
-    let overlay = "";
-    if (params.get("c")) overlay = drawer(params.get("c"));
-    if (params.get("modal") === "send") overlay = sendModal(parts[1] || 2);
-    if (params.get("modal") === "merge") overlay = mergeModal(parts[1] || 2);
-    app.innerHTML = topbar(role, parts) + `<div class="proto-banner">Layout prototype: sample data only. Buttons are not wired up yet.</div>` + shell + overlay;
-    document.title = "MTCS Portfolio Tracker – " + ({ assessor: "Assessor view", witness: "Witness view", shared: "Shared with me", landing: "Choose your route" }[role] || page);
-  }
-
-  function topbar(role, parts) {
-    const ar = roleOf(ui.active.role);
-    if (role === "assessor" || role === "witness" || role === "shared") {
-      return `<header class="topbar">
-        <div class="brand"><div class="logo" aria-hidden="true">MT</div><span>Portfolio Tracker</span></div>
-        <span class="pack-chip">${role === "assessor" ? "Assessor view" : role === "witness" ? "Witness view" : "Imported copy"}</span>
-        <div class="spacer"></div>
-        <button class="route-chip exit" data-href="${role === "shared" ? "#/" : "#/activity/" + esc(parts[1] || 1)}" title="Leave this view">✕ ${role === "shared" ? "Exit imported copy" : "Exit preview"}</button>
-      </header>`;
-    }
-    const landing = role === "landing";
-    return `<header class="topbar">
-      <div class="brand"><div class="logo" aria-hidden="true">MT</div><span>Portfolio Tracker</span></div>
-      ${landing ? "" : `<button class="route-chip" data-href="#/" title="Change route">${esc(routeName(ar, ui.active.grade)) + (ar.single ? "" : " + Core")} <span aria-hidden="true">▾</span></button>`}
-      <div class="spacer"></div>
-      <button class="backup-chip${backupDays() > 7 ? " stale" : ""}" data-href="#/backup" title="Backup and restore. Last backup ${backupWhen()}"><span class="bdot" aria-hidden="true"></span><span aria-hidden="true">☁</span><span class="bl">Backed up ${backupDays()} days ago</span><span class="sr-only">Backup and restore</span></button>
-    </header>`;
-  }
-
-  function sidenav(cur) {
-    const t = totals();
-    const a = (id, href, ico, label, count) => `<a href="${href}" class="${cur === id ? "active" : ""}"><span class="ico" aria-hidden="true">${ico}</span><span class="lbl">${label}</span>${count != null ? `<span class="count${count.alert ? " alert" : ""}" title="${count.title}">${count.n}</span>` : ""}</a>`;
-    const unm = S.evidence.filter(e => !e.criteria.length).length;
-    return `<nav class="sidenav" aria-label="Main">
-      ${a("dashboard", "#/dashboard", "◧", "Dashboard")}
-      <div class="group">Activities</div>
-      ${S.activities.map(x => a("activity" + x.n, "#/activity/" + x.n, x.n, esc(x.title))).join("")}
-      <a href="#" data-toast="Adding a fourth activity is allowed if the assessor wants one."><span class="ico">＋</span>New activity</a>
-      <div class="group">Portfolio</div>
-      ${a("matrix", "#/matrix", "▦", "Coverage matrix", { n: t.gap, alert: t.gap > 0, title: t.gap + " criteria with a gap" })}
-      ${a("evidence", "#/evidence", "▤", "Evidence library", { n: unm || S.evidence.length, alert: unm > 0, title: unm ? unm + " items unmapped" : "items" })}
-      ${a("forms", "#/forms", "📄", "Forms and templates")}
-      <a href="#/"><span class="ico">⇄</span><span class="lbl">Shared with me</span></a>
-      ${a("export", "#/export", "⇪", "Export for MTCS")}
-      ${a("backup", "#/backup", "☁", "Backup and restore")}
-      ${a("settings", "#/settings", "⚙", "Settings")}
-      <div class="trip-box"><b>Current trip</b><br>${esc(S.trip.vessel)}<br>${esc(S.trip.project)}<br><span class="muted">${esc(S.trip.dates)}</span></div>
-    </nav>`;
-  }
-  function bottomnav(cur) {
-    const t = totals();
-    const more = ["more", "export", "backup", "settings", "forms"].includes(cur);
-    const a = (on, href, ico, label, badge) => `<a href="${href}" class="${on ? "active" : ""}"><span class="ico">${ico}${badge ? `<span class="badge">${badge}</span>` : ""}</span>${label}</a>`;
-    return `<nav class="bottomnav" aria-label="Main">${a(cur === "dashboard", "#/dashboard", "◧", "Home")}${a(cur.startsWith("activity"), "#/activity/" + (ui.lastAct || 2), "▣", "Activities")}${a(cur === "matrix", "#/matrix?f=gap", "▦", "Gaps", t.gap || "")}${a(cur === "evidence", "#/evidence", "▤", "Evidence")}${a(more, "#/more", "☰", "More", backupDays() > 7 ? "!" : "")}</nav>`;
-  }
-
-  // ---------- 1. Dashboard ----------
-  const ctxChip = () => { const ar = roleOf(ui.active.role); return `<a class="ctx-chip" href="#/" title="Change route"><b>${esc(routeName(ar, ui.active.grade))}${ar.single ? "" : " + Core"}</b><span>${esc(S.trip.vessel)} · ${esc(S.trip.project)}</span></a>`; };
-  function backupNudge() {
-    return backupDays() > 7 ? `<div class="nudge" role="alert"><span aria-hidden="true">☁</span><div class="grow"><b>No backup for ${backupDays()} days.</b><div class="small">Your portfolio is only in this browser. Back up so it isn't lost.</div></div><a class="btn sm primary" href="#/backup">Back up now</a></div>` : "";
-  }
-  function nextItems() {
-    const t = totals();
-    const gaps = CRITS.filter(k => critState(k.id) === "gap").map(k => k.id);
-    const planned = CRITS.filter(k => critState(k.id) === "planned").length;
-    const flagged = S.evidence.filter(e => e.redact).length;
-    const unm = S.evidence.filter(e => !e.criteria.length).length;
-    return [
-      gaps.length && { st: "gap", t: `${gaps.length} criteria with a gap (${gaps.join(", ")})`, s: "Not in any activity yet. Decide with the assessor.", href: "#/matrix?f=gap" },
-      planned && { st: "planned", t: `${planned} planned with no evidence`, s: "Mostly Activity 3", href: "#/matrix?f=planned" },
-      { st: "mapped", t: "Activity 2 with assessor, link expires 25 Oct", s: "Sent 11 Oct. Chase [Assessor] to sign.", href: "#/activity/2" },
-      flagged && { st: "warn", t: `${flagged} items flagged for client data`, s: "Check before sharing or exporting", href: "#/evidence" },
-      unm && { st: "warn", t: `${unm} evidence items not mapped to a criterion`, s: "Alarm call point photo, TSS calibration sheet", href: "#/evidence" },
-      { st: backupDays() > 7 ? "gap" : "ok", t: `Last backup ${backupDays()} days ago`, s: backupWhen() + " · this device", href: "#/backup" }
-    ].filter(Boolean);
-  }
-  const DOT = { gap: "var(--gap)", planned: "var(--planned-dot)", mapped: "var(--mapped-dot)", signed: "var(--signed)", warn: "#c99a00", ok: "var(--signed)" };
-  function viewDashboard() {
-    const t = totals();
-    const n = CRITS.length;
-    const pct = v => Math.round(100 * v / n);
-    const compRows = COMPS.map(c => {
-      const s = compStats(c);
-      return `<a class="comp-row" href="#/matrix?f=all&comp=${c.id}"><span class="id">${c.unitId === "core" ? "C" : "S"}${c.number}</span>
-        <span class="t" title="${esc(c.title)}">${esc(c.title)}</span>
-        <div class="bar" aria-label="${s.signed} signed, ${s.mapped} evidenced of ${s.total}"><span class="s" style="width:${100 * s.signed / s.total}%"></span><span class="m" style="width:${100 * s.mapped / s.total}%"></span><span class="p" style="width:${100 * s.planned / s.total}%"></span></div>
-        <span class="small muted pct">${s.signed + s.mapped}/${s.total}${s.gap ? ` <b style="color:var(--gap)">·${s.gap}</b>` : ""}</span></a>`;
-    });
-    const items = nextItems();
-    return `
-    <h1 class="sr-only">Dashboard</h1>
-    ${backupNudge()}
-    <div class="dash-head">${ctxChip()}<div class="actions"><button class="btn sm" data-toast="Quick capture would open the camera or file picker.">＋ Add evidence</button></div></div>
-
-    <section class="card next-card"><div class="card-head"><h2>What's next</h2><span class="right pill info">${items.length}</span></div>
-      <div class="next-list">${items.map(i => `<a class="next-row" href="${i.href}"><span class="dot" style="background:${DOT[i.st]}"></span><span class="grow"><b>${esc(i.t)}</b><span class="small muted">${esc(i.s)}</span></span><span class="chev" aria-hidden="true">›</span></a>`).join("")}</div>
-    </section>
-    ${packBanner("dashboard")}
-
-    <div class="grid g-3" style="margin-top:16px">
-      <section class="card"><div class="card-head"><h2>Readiness</h2><span class="right small muted">${n} criteria</span></div>
-        <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
-          <div class="ring" style="--v:${pct(t.signed)};--w:${pct(t.signed + t.mapped)};--x:${pct(t.signed + t.mapped + t.planned)}" data-label="${t.signed} signed\n${t.gap} gaps" role="img" aria-label="${t.signed} signed, ${t.gap} gaps"></div>
-          <div class="small" style="flex:1;min-width:150px">
-            ${statLine("signed", t.signed)}${statLine("mapped", t.mapped)}${statLine("planned", t.planned)}${statLine("gap", t.gap)}
-            <div style="margin-top:6px" class="muted"><b>${t.compsAll3}/13</b> competences in all 3 activities</div>
-          </div></div>
-      </section>
-      <section class="card"><div class="card-head"><h2>Direct evidence</h2><span class="right pill ${t.directPct >= 70 ? "signed" : "gap"}">${t.directPct >= 70 ? "On track" : "Below 70%"}</span></div>
-        <div class="kpi"><div class="value">${t.directPct}%</div><div class="label">observation and work product (O, P)</div></div>
-        <div style="margin:26px 0 8px"><div class="meter" style="--d:${t.directPct}%"><span class="mark"></span></div></div>
-        <p class="small muted">${t.direct} direct and ${t.indirect} indirect (W, Q) entries. MTCS asks for at least 70% direct. How MTCS counts this isn't confirmed, so treat it as a guide.</p>
-      </section>
-      <section class="card"><div class="card-head"><h2>Outstanding signatures</h2><span class="right pill mapped">6</span></div>
-        <ul class="list small">
-          <li><span class="dot" style="background:var(--mapped-dot)"></span><div class="grow"><b>Activity 2</b>: 13 competence sheets, Feedback Form, UKQs<div class="muted">With [Assessor] since 11 Oct</div></div></li>
-          <li><span class="dot" style="background:var(--planned-dot)"></span><div class="grow"><b>Activity 3</b>: plan agreed, sheets not sent yet</div></li>
-          <li><span class="dot" style="background:var(--mapped-dot)"></span><div class="grow"><b>Record of Witness</b>: [Witness], Activity 1 rows</div></li>
-          <li><span class="dot" style="background:var(--planned-dot)"></span><div class="grow"><b>Assessor Sign-off</b> ×2 (Surveyor, Core): ink, after Activity 3</div></li>
-          <li><span class="dot" style="background:var(--planned-dot)"></span><div class="grow"><b>Witness Statements</b> ×2: referee forms, [Shore manager]</div></li>
-        </ul></section>
-    </div>
-
-    <div class="grid g-main" style="margin-top:16px">
-      <section class="card"><div class="card-head"><h2>Progress by competence</h2><a class="right btn sm ghost" href="#/matrix?f=all">All criteria →</a></div>
-        ${legend()}
-        <h3 class="small muted" style="margin-top:10px">G2 Core</h3>${compRows.slice(0, 3).join("")}
-        <h3 class="small muted" style="margin-top:14px">G2 Surveyor</h3>${compRows.slice(3).join("")}
-      </section>
-      <section class="card"><div class="card-head"><h2>Activities</h2></div>
-        <div class="stack" style="gap:10px">${S.activities.map(activityCard).join("")}</div></section>
-    </div>`;
-  }
-  const statLine = (st, v) => `<div class="stat-line"><span class="sw ${st}"></span><b>${v}</b> ${STATE_LABEL[st]}</div>`;
-  const legend = () => `<div class="legend">${["signed", "mapped", "planned", "gap"].map(st => `<span><i class="sw ${st}"></i>${STATE_LABEL[st]}</span>`).join("")}</div>`;
-  function activityCard(a) {
-    const ids = CRITS.filter(k => cov(k.id, a.n));
-    const withEv = ids.filter(k => ["mapped", "signed"].includes(cov(k.id, a.n).state)).length;
-    const signed = ids.filter(k => cov(k.id, a.n).state === "signed").length;
-    return `<a class="act-card ${a.status}" href="#/activity/${a.n}">
-      <div class="num">${a.n}</div>
-      <div class="grow"><b>${esc(a.title)}</b><div class="small muted">${esc(a.dates)} · ${ids.length} criteria · ${withEv} with evidence · ${signed} signed</div>
-        <div class="bar" style="margin-top:6px"><span class="s" style="width:${100 * signed / ids.length}%"></span><span class="m" style="width:${100 * (withEv - signed) / ids.length}%"></span><span class="p" style="width:${100 * (ids.length - withEv) / ids.length}%"></span></div></div>
-      <span class="pill ${actPill(a)}">${esc(a.statusLabel)}</span></a>`;
-  }
-  const actPill = a => a.status === "signed" ? "signed" : a.status === "with-assessor" ? "mapped" : "planned";
-
-  // ---------- 2. Activity workspace ----------
-  function actSwitch(cur, base) {
-    return `<div class="act-switch" role="tablist" aria-label="Activity">${S.activities.map(x => `<a role="tab" href="${base}${x.n}" class="${x.n === cur ? "on" : ""}" aria-selected="${x.n === cur}"><b>${x.n}</b><span>${esc(x.title.split(" ")[0])}</span><i class="sw ${actPill(x)}"></i></a>`).join("")}</div>`;
-  }
-  function viewActivity(n) {
-    const a = actOf(n) || S.activities[0];
-    ui.lastAct = a.n;
-    const ev = S.evidence.filter(e => e.act === a.n);
-    const planned = CRITS.filter(k => cov(k.id, a.n));
-    const noEv = planned.filter(k => cov(k.id, a.n).state === "planned").length;
-    const next = a.status === "signed" ? `Signed and locked by [Assessor] on ${esc(a.signedOn)}. Nothing more to do here.`
-      : a.status === "with-assessor" ? `With [Assessor] since ${esc(a.linkSent)}. Link expires 25 Oct 2026. Chase for signature.`
-      : `${noEv} of ${planned.length} planned criteria still need evidence. Add it, then send to the assessor.`;
-    const groups = COMPS.map(c => {
-      const ks = c.criteria.filter(k => cov(k.id, a.n));
-      if (!ks.length) return "";
-      return `<div class="crit-group"><div class="small cg-head">${compLabel(c)} <span class="muted">· ${esc(c.title)}</span></div>
-        ${ks.map(k => { const cv = cov(k.id, a.n); return `<a href="#/activity/${a.n}?c=${k.id}" class="crit-line">
-          <span class="mcell ${cv.state}" title="${STATE_LABEL[cv.state]}">${cv.code}${cv.state === "signed" ? " ✓" : ""}</span><span class="crit-id">${k.id}</span><span class="cl-text">${esc(shortLabel(k.text))}</span></a>`; }).join("")}</div>`;
-    }).join("");
-    const f = (unit, kind, label) => tplLink(tplFind(unit, kind), label);
-    return `
-    ${actSwitch(a.n, "#/activity/")}
-    <section class="card act-status ${a.status}">
-      <div class="as-top"><div class="num">${a.n}</div><div class="grow"><h1>${esc(a.title)}</h1><div class="small muted">${esc(a.dates)} · ${esc(S.trip.vessel)}</div></div><span class="pill ${actPill(a)}">${esc(a.statusLabel)}</span></div>
-      <div class="next-step"><b>Next step</b><span>${next}</span></div>
-      <div class="btn-row">
-        ${a.status === "signed" ? "" : `<a class="btn primary" href="#/activity/${a.n}?modal=send">${a.linkSent ? "Resend link" : "Send to assessor ➜"}</a>`}
-        <a class="btn" href="#/assessor/${a.n}">Preview assessor view</a>
-        <a class="btn" href="#/witness/${a.n}">Preview witness view</a>
-      </div>
-    </section>
-
-    <div class="act-grid">
-      <section class="card ag-evidence"><div class="card-head"><h2>Evidence</h2><span class="right small muted">${ev.length} items</span></div>
-        <div class="add-row">
-          <button class="add-tile" data-toast="Would open the camera. Photos are named Criterion_Activity_Title_Date."><span class="ev-ico photo">📷</span><div><b>Photo</b><span>Take or upload</span></div></button>
-          <button class="add-tile" data-toast="Would open the file picker."><span class="ev-ico">📄</span><div><b>File</b><span>Log, report, plot</span></div></button>
-          <button class="add-tile" data-toast="Would open a short write-up editor."><span class="ev-ico written">✍️</span><div><b>Written</b><span>Note or testimony</span></div></button>
-          <button class="add-tile" data-toast="Would send a narrow witness link."><span class="ev-ico witness">🧾</span><div><b>Witness</b><span>Ask a witness</span></div></button>
-        </div>
-        <ul class="list">${ev.map(evRow).join("") || `<li class="muted small">No evidence yet.</li>`}</ul>
-      </section>
-
-      <section class="card ag-criteria"><div class="card-head"><h2>Criteria</h2><span class="right small muted">${planned.length}</span></div>
-        ${legend()}
-        <p class="tiny muted" style="margin:6px 0 10px">Tap a criterion for its full wording, evidence and notes.</p>
-        ${groups}
-      </section>
-
-      <details class="card ag-plan" ${a.planAgreed ? "" : "open"}><summary><h2>Assessment Plan</h2><span class="pill ${a.planAgreed ? "signed" : "planned"}">${a.planAgreed ? "Agreed " + esc(a.planAgreed) : "Draft"}</span></summary>
-        <dl class="kv">
-          <dt>Work activity</dt><dd>${esc(a.summary)}</dd>
-          <dt>Criteria</dt><dd>${planned.length} criteria across all 13 competences (Surveyor 1–10, Core 1–3)</dd>
-          <dt>Evidence types</dt><dd>Observation, work product, questioning${a.n === 3 ? ", written (historic LBL testimony)" : ""}</dd>
-          <dt>Dates</dt><dd>${esc(a.dates)}</dd>
-          <dt>Where</dt><dd>${esc(a.where)}</dd>
-          <dt>Witness</dt><dd>${esc(a.witness)}</dd>
-          <dt>Assessor</dt><dd>[Assessor], Senior Surveyor</dd>
-        </dl>
-        <div class="btn-row"><button class="btn sm" data-toast="Would open the plan editor (one plan per unit: Surveyor and Core).">Edit plan</button></div>
-      </details>
-
-      <section class="card ag-people"><div class="card-head"><h2>People and link</h2></div>
-        <ul class="list small">
-          <li><span class="avatar" style="width:30px;height:30px;color:#fff">As</span><div class="grow"><b>[Assessor]</b><div class="muted">Assessor · Senior Surveyor</div></div><span class="pill ${a.status === "signed" ? "signed" : a.linkSent ? "mapped" : "planned"}">${a.status === "signed" ? "Signed " + esc(a.signedOn) : a.linkSent ? "Link sent" : "Not sent"}</span></li>
-          <li><span class="avatar" style="width:30px;height:30px;color:#fff;background:#8a94a6">W</span><div class="grow"><b>${a.witness === "None" ? "No witness" : esc(a.witness)}</b><div class="muted">Witness (optional, named on plan)</div></div>${a.witness === "None" ? `<button class="btn sm" data-toast="Would add a witness to the plan.">Add</button>` : `<span class="pill mapped">Rows to sign</span>`}</li>
-        </ul>
-      </section>
-
-      <section class="card ag-forms"><div class="card-head"><h2>Blank MTCS forms</h2><a class="right btn sm ghost" href="#/forms">All forms →</a></div>
-        <p class="tiny muted" style="margin:0 0 8px">These come from your imported forms pack (Forms and templates). Not imported yet in this sample. The links below are for one-off downloads from MTCS. ${MTCS_NOTE}</p>
-        <a class="btn sm primary" href="#/forms" style="margin-bottom:8px">Open forms pack</a>
-        <div class="tpl-list">
-          ${f("surveyor", "plan", "Assessment Plan – G2 Surveyor")}${f("core", "plan", "Assessment Plan – G2 Core")}
-          ${f("surveyor", "feedback", "Feedback Form – G2 Surveyor")}${f("core", "feedback", "Feedback Form – G2 Core")}
-          ${a.witness !== "None" ? f("surveyor", "witness-record", "Record of Witness Form") : ""}
-          ${f("surveyor", "testimony", "Candidate Testimony")}
-        </div>
-        <a class="small" href="#/forms">Competence sheets and UKQ sheets (13 each) →</a>
-      </section>
-
-      <section class="card ag-share"><div class="card-head"><h2>Share this activity (zip)</h2><span class="right pill planned">No accounts</span></div>
-        <div class="share-block"><b>Export activity for assessor (.zip)</b>
-          <p class="small muted">One zip for this activity: plan, criteria states, evidence files and manifest.json (IDs, version, SHA-256 hashes). Send it by email, message or USB. Your assessor does not need your portfolio or an account.</p>
-          <div class="btn-row"><button class="btn primary" data-toast="Layout only: no zip is created yet.">⤓ Export activity for assessor (.zip)</button></div>
-          <p class="tiny muted">Sample: last export v3 · 11 Oct 2026 · ${planned.length} criteria · hashes included to detect missing or changed files.</p></div>
-        <div class="share-block"><b>Import assessor return (.zip)</b>
-          <p class="small muted">When your assessor sends a reviewed zip back, import it here. You review the changes first. Import never silently overwrites: it is applied as a new version on top, with rollback.</p>
-          <div class="btn-row"><a class="btn" href="#/activity/${a.n}?modal=merge">⤒ Import assessor return (.zip)</a></div></div>
-        <div class="share-block"><b>Version history</b>
-          <ul class="list small">
-            <li><span class="pill signed">v3</span><div class="grow">Current · exported to assessor 11 Oct 2026</div></li>
-            <li><span class="pill planned">v2</span><div class="grow">Before Activity ${a.n} evidence tidy-up</div><button class="btn sm" data-toast="Layout only: restore is not wired.">Restore</button></li>
-            <li><span class="pill planned">v1</span><div class="grow">First plan</div><button class="btn sm" data-toast="Layout only: restore is not wired.">Restore</button></li>
-          </ul>
-          <p class="tiny muted">After an import, the previous version stays here as a snapshot. Use Restore previous version to roll back.</p></div>
-      </section>
-    </div>`;
-  }
-  function evRow(e) {
-    return `<li class="${e.criteria.length ? "" : "unmapped"}" style="${e.criteria.length ? "" : "padding-left:10px"}"><span class="ev-ico ${e.type}" aria-hidden="true">${EV_ICON[e.type]}</span>
-      <div class="grow"><b class="small">${esc(e.title)}</b>${e.redact ? ` <span class="pill warn">Check for client data</span>` : ""}
-        <div class="fname">${esc(e.file)}</div>
-        <div>${e.criteria.map(c => `<a class="ev-chip" href="${here()}?c=${c}">${c}</a>`).join("") || `<span class="pill gap" style="margin-top:6px">Unmapped</span>`}</div></div>
-      <div style="text-align:right">${e.code ? `<span class="code" style="background:var(--brand-soft);color:var(--brand)" title="Evidence type">${e.code}</span>` : ""}<div class="tiny muted" style="margin-top:4px">${esc(e.date)}</div><button class="btn sm ghost" data-toast="Layout only: no preview yet. Sample item: no file attached yet.">View</button></div></li>`;
-  }
-
-
-  // ---------- 3. Coverage matrix ----------
-  const CODE_HELP = `<div class="code-help" id="codehelp">
-    <h3>What the cells mean</h3>
-    <p class="small">Each cell is one activity. The letter is the type of evidence from the MTCS competence sheet; the colour is the status.</p>
-    <dl class="kv small"><dt>O</dt><dd>Observation by the assessor</dd><dt>P</dt><dd>Work product (log, report, plot)</dd><dt>W</dt><dd>Written (e.g. candidate testimony)</dd><dt>Q</dt><dd>Questioning</dd><dt>N/C · N/A</dt><dd>Not covered · Not applicable</dd><dt>✓</dt><dd>The assessor has signed it, e.g. <b>O ✓</b> = observed and signed</dd><dt>–</dt><dd>Not in this activity's plan</dd></dl>
-    ${legend()}</div>`;
-  function viewMatrix(params) {
-    if (params && params.get("f") && ui.fApplied !== location.hash) { ui.mState = params.get("f"); ui.fApplied = location.hash; }
-    const compFocus = params && params.get("comp");
-    const t = totals();
-    const q = ui.mSearch.toLowerCase();
-    const match = k => {
-      const st = critState(k.id);
-      if (ui.mState !== "all" && st !== ui.mState) return false;
-      if (q && !(k.id.toLowerCase().includes(q) || k.text.toLowerCase().includes(q))) return false;
-      return true;
-    };
-    const comps = COMPS.filter(c => (ui.mUnit === "all" || ui.mUnit === c.unitId) && (!compFocus || c.id === compFocus));
-    const cell = cv => `<span class="mcell ${cv ? cv.state : "empty"}" title="${cv ? STATE_LABEL[cv.state] : "Not in this activity"}">${cv ? cv.code + (cv.state === "signed" ? " ✓" : "") : "–"}</span>`;
-    let rows = "", cards = "", hidden = 0;
-    comps.forEach(c => {
-      const ks = c.criteria.filter(match);
-      const s = compStats(c);
-      if (!ks.length) { hidden++; return; }
-      rows += `<tr class="group-row"><td colspan="6">${compLabel(c)} · ${esc(c.title)} <span class="small muted" style="font-weight:400">· ${s.signed + s.mapped}/${s.total} evidenced · in ${s.acts}/3 activities · ${esc(c.imca)}</span></td></tr>`;
-      ks.forEach(k => { rows += `<tr class="crit-row" data-href="#/matrix?c=${k.id}" tabindex="0"><td class="crit-id">${k.id}</td><td class="crit-text">${esc(k.text)}</td>${[1, 2, 3].map(a => `<td class="cell">${cell(cov(k.id, a))}</td>`).join("")}<td class="status">${pill(critState(k.id))}</td></tr>`; });
-      cards += `<details class="comp-card" ${ui.mState !== "all" || compFocus || q ? "open" : ""}>
-        <summary><span class="cc-title"><b>${compLabel(c)}</b> · ${s.signed + s.mapped}/${s.total} · ${s.acts}/3 activities</span><span class="cc-sub small muted">${esc(c.title)}</span>
-          <span class="bar"><span class="s" style="width:${100 * s.signed / s.total}%"></span><span class="m" style="width:${100 * s.mapped / s.total}%"></span><span class="p" style="width:${100 * s.planned / s.total}%"></span></span></summary>
-        ${ks.map(k => `<a class="cc-row" href="#/matrix?c=${k.id}"><span class="crit-id">${k.id}</span><span class="cl-text">${esc(shortLabel(k.text))}</span><span class="chips">${[1, 2, 3].map(a => { const cv = cov(k.id, a); return `<span class="chip ${cv ? cv.state : "empty"}" title="Activity ${a}: ${cv ? STATE_LABEL[cv.state] : "not in plan"}"><i>${a}</i>${cv ? cv.code + (cv.state === "signed" ? "✓" : "") : "–"}</span>`; }).join("")}</span></a>`).join("")}
-      </details>`;
-    });
-    const seg = (key, val, label) => `<button data-ui="${key}" data-val="${val}" class="${ui[key] === val ? "on" : ""}">${label}</button>`;
-    const none = `<p class="small muted card">Nothing here for "${ui.mState === "all" ? "All" : STATE_LABEL[ui.mState]}". <button class="btn sm" data-ui="mState" data-val="all">Show all</button></p>`;
-    return `
-    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Coverage matrix</h1>
-      <p class="muted hide-sm" style="margin:0">All ${CRITS.length} criteria against Activities 1–3. Each competence must appear in all 3 activities; each criterion at least once.</p></div>
-      <div class="actions hide-sm"><button class="btn" data-toast="Would print the matrix as a one-page summary for the assessor.">Print summary</button></div></div>
-    <div class="kpi-strip">
-      <button data-ui="mState" data-val="all" class="${ui.mState === "all" ? "on" : ""}"><b>${CRITS.length}</b> All</button>
-      <button data-ui="mState" data-val="signed" class="${ui.mState === "signed" ? "on" : ""}"><span class="sw signed"></span><b>${t.signed}</b> Signed</button>
-      <button data-ui="mState" data-val="mapped" class="${ui.mState === "mapped" ? "on" : ""}"><span class="sw mapped"></span><b>${t.mapped}</b> Evidenced</button>
-      <button data-ui="mState" data-val="planned" class="${ui.mState === "planned" ? "on" : ""}"><span class="sw planned"></span><b>${t.planned}</b> Planned</button>
-      <button data-ui="mState" data-val="gap" class="${ui.mState === "gap" ? "on" : ""}"><span class="sw gap"></span><b>${t.gap}</b> Gap</button>
-    </div>
-    <div class="filters">
-      <div class="seg" role="group" aria-label="Status">${seg("mState", "all", "All")}${seg("mState", "gap", "Gap")}${seg("mState", "planned", "Planned")}${seg("mState", "mapped", "Evidenced")}${seg("mState", "signed", "Signed")}</div>
-      <div class="seg" role="group" aria-label="Unit">${seg("mUnit", "all", "Both units")}${seg("mUnit", "core", "Core")}${seg("mUnit", "surveyor", "Surveyor")}</div>
-      <button class="icon-btn" data-ui="mSearchOpen" data-val="toggle" aria-label="Search criteria" aria-expanded="${ui.mSearchOpen || !!ui.mSearch}">🔍</button>
-      <button class="icon-btn" data-ui="mLegend" data-val="toggle" aria-label="What the codes mean" aria-expanded="${ui.mLegend}">?</button>
-      ${ui.mSearchOpen || ui.mSearch ? `<label class="sr-only" for="msearch">Search criteria</label><input type="search" id="msearch" data-ui-input="mSearch" placeholder="Search, e.g. USBL or S08" value="${esc(ui.mSearch)}">` : ""}
-    </div>
-    ${compFocus ? `<p class="small">Showing ${esc(compFocus)} only. <a href="#/matrix">Show all competences</a></p>` : ""}
-    ${ui.mLegend ? CODE_HELP : ""}
-    <div class="only-wide"><div class="table-wrap" style="max-height:calc(100vh - 330px);min-height:360px"><table>
-      <thead><tr><th>ID</th><th>Criterion (verbatim)</th><th style="text-align:center">Activity 1<br><span style="font-weight:400;text-transform:none">Set-up</span></th><th style="text-align:center">Activity 2<br><span style="font-weight:400;text-transform:none">Online shift</span></th><th style="text-align:center">Activity 3<br><span style="font-weight:400;text-transform:none">Handover</span></th><th>Status</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="6" class="muted">Nothing matches these filters.</td></tr>`}</tbody></table></div></div>
-    <div class="only-narrow">${cards || none}${cards && hidden ? `<p class="small muted">${hidden} other competences have nothing in this filter. <button class="btn sm" data-ui="mState" data-val="all">Show all</button></p>` : ""}</div>
-    <p class="small muted">Tap <b>?</b> for what the codes mean. Tap a criterion for its full wording.</p>`;
-  }
-
-  // ---------- 4. Criterion drawer ----------
-  function drawer(id) {
-    const k = critById(id);
-    if (!k) return "";
-    const ev = evFor(id);
-    const st = critState(id);
-    const back = location.hash.split("?")[0];
-    const actRows = [1, 2, 3].map(a => { const cv = cov(id, a); const A = actOf(a);
-      return `<tr><td>Activity ${a}<div class="tiny muted">${esc(A.title)}</div></td><td>${cv ? `<span class="mcell ${cv.state}">${cv.code}${cv.state === "signed" ? " ✓" : ""}</span>` : "–"}</td><td>${cv ? pill(cv.state) : `<span class="muted small">Not in plan</span>`}</td><td class="small">${cv && cv.state === "signed" ? "[Assessor], " + esc(A.signedOn) : "–"}</td></tr>`; }).join("");
-    const gapNote = { S09d: "No USBL calibration this trip, only verifications. Ask the assessor whether a verification counts, or plan it for a future mobilisation.", S09f: "No LBL calibration on this job. Options: N/A, questioning now, or a later job. The assessor decides.", S08f: "LBL was used on the pipelay job. Historic testimony is linked; the assessor decides if it is accepted.", S10e: "No land survey work offshore. Covered by questioning in Activity 3." }[id];
-    const sheet = tplFind(k.comp.unitId, "criteria", k.comp.number), ukqT = tplFind(k.comp.unitId, "ukq", k.comp.number);
-    return `<div class="scrim" data-href="${back}"></div>
-    <aside class="drawer" role="dialog" aria-label="Criterion ${id}">
-      <header><div><div class="small muted">${compLabel(k.comp)} · ${esc(k.comp.unitName)}</div><h2 style="margin:2px 0 6px">${id} ${pill(st)}</h2></div><button class="close" data-href="${back}" aria-label="Close">✕</button></header>
-      <div class="body">
-        <div class="quote">${esc(k.text)}</div>
-        <dl class="kv small"><dt>Competence</dt><dd>${esc(k.comp.title)}</dd><dt>IMCA reference</dt><dd>${esc(k.comp.imca)}</dd><dt>Source form</dt><dd class="fname">${esc(k.comp.file)}</dd></dl>
-        <div class="tpl-list" style="margin-top:10px">${tplLink(sheet, "Blank competence sheet")}${tplLink(ukqT, "Blank UKQ sheet")}</div><p class="tiny muted" style="margin:0">${MTCS_NOTE}</p>
-        ${gapNote ? `<div class="card" style="background:var(--warn-bg);border-color:#f0dfa6;margin-top:14px;padding:12px"><b class="small">Note</b><p class="small" style="margin:4px 0 0">${gapNote}</p></div>` : ""}
-        <h3 style="margin-top:18px">By activity</h3>
-        <div class="table-wrap"><table><thead><tr><th>Activity</th><th>Code</th><th>Status</th><th>Assessor</th></tr></thead><tbody>${actRows}</tbody></table></div>
-        <h3 style="margin-top:18px">Linked evidence (${ev.length})</h3>
-        <div class="sample-note slim"><span aria-hidden="true">ℹ️</span><div><b>Sample data:</b> in the real app each item is a real file stored in this browser, and previews here. These sample items have no file attached yet.</div></div>
-        <ul class="list">${ev.map(evRow).join("") || `<li class="small muted">No evidence linked yet.</li>`}</ul>
-        <h3 style="margin-top:18px">Assessor notes</h3>
-        <div class="field"><textarea readonly>${st === "signed" ? "Observed during set-up checks. Candidate explained each step clearly." : ""}</textarea></div>
-        <h3>My notes</h3>
-        <div class="field"><textarea placeholder="e.g. what to ask the party chief, where the record is saved"></textarea></div>
-      </div>
-      <footer><button class="btn" data-toast="Would open the evidence library to link an item.">Link evidence</button><button class="btn primary" data-toast="Would capture new evidence for ${id}.">＋ Add evidence</button></footer>
-    </aside>`;
-  }
-
-  // ---------- 5. Evidence library ----------
-  function viewEvidence() {
-    const q = ui.eSearch.toLowerCase();
-    const items = S.evidence.slice().sort((x, y) => (x.criteria.length ? 1 : 0) - (y.criteria.length ? 1 : 0)).filter(e => (ui.eType === "all" || e.type === ui.eType) && (!ui.eUnmapped || !e.criteria.length) &&
-      (!q || (e.title + e.file + e.tags.join(" ") + e.criteria.join(" ")).toLowerCase().includes(q)));
-    const unm = S.evidence.filter(e => !e.criteria.length);
-    const seg = (val, label) => `<button data-ui="eType" data-val="${val}" class="${ui.eType === val ? "on" : ""}">${label}</button>`;
-    const rows = items.map(e => `<tr class="${e.criteria.length ? "" : "unmapped"}">
-      <td><div style="display:flex;gap:10px;align-items:center"><span class="ev-ico ${e.type}" aria-hidden="true">${EV_ICON[e.type]}</span><div><b>${esc(e.title)}</b><div class="fname">${esc(e.file)}</div></div></div></td>
-      <td class="small">${EV_TYPE[e.type]}</td>
-      <td class="small">${e.act ? "Activity " + e.act : `<span class="muted">None</span>`}</td>
-      <td>${e.code ? `<span class="code" style="background:var(--brand-soft);color:var(--brand)">${e.code}</span>` : "–"}</td>
-      <td>${e.criteria.map(c => `<a class="ev-chip" href="${here()}?c=${c}">${c}</a>`).join("") || `<span class="pill gap">Unmapped</span>`}</td>
-      <td>${e.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}${e.redact ? `<span class="pill warn">Check client data</span>` : ""}</td>
-      <td class="small" style="white-space:nowrap">${esc(e.date)}</td>
-      <td><button class="btn sm" data-toast="Layout only: no preview yet. Sample item: no file attached yet.">Preview</button><div class="tiny muted" style="margin-top:3px">No file attached yet</div></td></tr>`).join("");
-    return `
-    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Evidence library</h1>
-      <p class="muted" style="margin:0">Everything you've captured, across all activities and past jobs.</p></div>
-    <div class="sample-note" role="note"><span aria-hidden="true">ℹ️</span><div><b>Sample data:</b> in the real app each item is a real file stored in this browser, and previews here. In this prototype the items below are labels only, so Preview says "No file attached yet".</div></div>
-      <div class="actions"><button class="btn" data-toast="Would rename files to Criterion_Activity_Title_Date.">Tidy file names</button><button class="btn primary" data-toast="Would open quick capture.">＋ Add evidence</button></div></div>
-    ${unm.length ? `<div class="card" style="border-left:4px solid var(--gap);margin-bottom:16px;padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b>${unm.length} items aren't mapped to any criterion yet.</b><span class="small muted">${unm.map(e => esc(e.title)).join(" · ")}</span><button class="btn sm" data-ui="eUnmapped" data-val="toggle" style="margin-left:auto">${ui.eUnmapped ? "Show all" : "Show unmapped only"}</button></div>` : ""}
-    <div class="filters">
-      <label class="sr-only" for="esearch">Search evidence</label>
-      <input type="search" id="esearch" data-ui-input="eSearch" placeholder="Search titles, tags or criteria" value="${esc(ui.eSearch)}">
-      <div class="seg" role="group" aria-label="Type">${seg("all", "All")}${seg("photo", "Photos")}${seg("file", "Files")}${seg("written", "Written")}${seg("witness", "Witness")}${seg("record", "Records")}</div>
-      <label class="checkline"><input type="checkbox" data-ui="eUnmapped" data-val="toggle" ${ui.eUnmapped ? "checked" : ""}> Unmapped only</label>
-    </div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Item</th><th>Type</th><th>Activity</th><th>Code</th><th>Criteria</th><th>Tags</th><th>Date</th><th>File</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="8" class="muted">Nothing matches.</td></tr>`}</tbody></table></div>
-    <p class="small muted">Codes are the evidence type the item supports (O, P, W, Q). The assessor's final code for each criterion is set on the competence sheet.</p>`;
-  }
-
-
-  // ---------- 6. Assessor link view (5 steps; sign only on the last) ----------
-  const PENDING = { 2: ["S09c", "S10d"], 3: [] }; // sample: criteria the assessor hasn't coded yet
-  function viewAssessor(n, params) {
-    const a = actOf(n) || S.activities[1];
-    const signed = a.status === "signed";
-    const planned = CRITS.filter(k => cov(k.id, a.n));
-    const pend = signed ? [] : (a.status === "with-assessor" ? PENDING[a.n] || [] : planned.filter(k => cov(k.id, a.n).state === "planned").map(k => k.id));
-    const coded = planned.length - pend.length;
-    if (params.get("step") && ui.stepApplied !== location.hash) { ui.aStep = Number(params.get("step")) || 1; ui.stepApplied = location.hash; }
-    const step = Math.min(5, Math.max(1, ui.aStep));
-    const STEPS = ["Plan", "Criteria", "Knowledge", "Feedback", "Sign"];
-    const qsData = S.ukq[a.n] || S.ukq[2];
-    const qMarked = qsData.filter(u => u.ok).length;
-    let first = 0, sec = "";
-    if (step === 1) sec = `<section class="card" id="s-plan"><div class="card-head"><span class="step">1</span><h2>Assessment Plan</h2><span class="right pill ${a.planAgreed ? "signed" : "planned"}">${a.planAgreed ? "Agreed " + esc(a.planAgreed) : "Awaiting agreement"}</span></div>
-        <div class="seg" style="margin-bottom:12px"><button class="on">G2 Surveyor plan</button><button>G2 Core plan</button></div>
-        <dl class="kv small">
-          <dt>Work activity to be assessed</dt><dd>${esc(a.summary)}</dd>
-          <dt>Performance criteria</dt><dd>Surveyor 1–10 and Core 1–3: ${planned.length} criteria</dd>
-          <dt>Type of evidence</dt><dd>Observation, work product, questioning</dd>
-          <dt>Date(s)</dt><dd>${esc(a.dates)}</dd>
-          <dt>Where</dt><dd>${esc(a.where)}</dd>
-          <dt>Needs and witness</dt><dd>12:00–00:00 shift. Witness: ${esc(a.witness)}</dd>
-        </dl>
-        <div class="btn-row"><button class="btn sm" data-toast="Would let the assessor suggest changes to the plan.">Suggest changes</button><button class="btn sm ${a.planAgreed ? "success" : "primary"}" data-toast="Would record the assessor's agreement with name and date.">${a.planAgreed ? "✓ Plan agreed" : "Agree plan"}</button></div>
-      </section>`;
-    if (step === 2) sec = `<section id="s-crit"><div class="card-head" style="margin:6px 4px 10px"><span class="step">2</span><h2>Criteria and evidence</h2><span class="right small muted">${planned.length} criteria</span></div>
-        ${legend()}<p class="tiny muted">Pick a code for each criterion. ${pend.length ? `${pend.length} not coded yet: ${pend.join(", ")}.` : ""}</p>
-        <div class="stack" style="gap:10px">${COMPS.map(c => {
-          const ks = c.criteria.filter(k => cov(k.id, a.n));
-          if (!ks.length) return "";
-          first++;
-          const hasPend = ks.some(k => pend.includes(k.id));
-          return `<details class="card" style="padding:0" ${first <= 1 || hasPend ? "open" : ""}><summary style="padding:14px 16px;cursor:pointer"><b>${compLabel(c)}</b> <span class="small muted">· ${esc(c.title)}</span> <span class="pill ${hasPend ? "planned" : "info"}" style="float:right">${ks.length} criteria</span></summary>
-            <div style="padding:0 16px 8px">${ks.map(k => { const cv = cov(k.id, a.n); const isP = pend.includes(k.id); const ev = evFor(k.id).filter(e => e.act === a.n || !e.act);
-              return `<div class="crit-card${isP ? " pending" : ""}"><div class="top"><span class="crit-id">${k.id}</span><div class="small" style="flex:1">${esc(k.text)}</div></div>
-                <div>${ev.map(e => `<span class="ev-chip">${EV_ICON[e.type]} ${esc(e.title)}</span>`).join("") || `<span class="tiny muted">No file linked. Candidate proposes ${cv.code === "O" ? "observation" : cv.code === "Q" ? "questioning" : "evidence"}.</span>`}</div>
-                <div class="codebar" role="group" aria-label="Evidence code for ${k.id}">${["O", "P", "W", "Q", "N/C", "N/A"].map(cd => `<button data-pick="${k.id}" class="${!isP && cd === cv.code ? "on" : ""}" ${signed ? "disabled" : ""}>${cd}</button>`).join("")}</div></div>`; }).join("")}</div></details>`;
-        }).join("")}</div></section>`;
-    if (step === 3) sec = `<section class="card" id="s-ukq"><div class="card-head"><span class="step">3</span><h2>Underpinning knowledge questions</h2></div>
-        <p class="small muted">Oral or written. The candidate has suggested questions; use, edit or replace them. Blank UKQ sheets: one per competence.</p>
-        ${qsData.map((u, i) => `<div class="crit-card"><div class="top"><span class="step">${i + 1}</span><div style="flex:1"><div class="small muted">Surveyor ${Number(u.comp.slice(1))}</div><b class="small">${esc(u.q)}</b>
-          <div class="field" style="margin:8px 0 0"><textarea aria-label="Answer note" placeholder="Note of the candidate's answer">${esc(u.a)}</textarea></div></div></div>
-          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;justify-content:flex-end"><span class="small muted">Satisfactory?</span><div class="yn"><button class="${u.ok === "Y" ? "y" : ""}" data-yn>Yes</button><button data-yn>No</button></div></div></div>`).join("")}
-        <div class="btn-row"><button class="btn sm" data-toast="Would add a blank question row (up to 10 per competence sheet).">＋ Add question</button></div>
-        <div class="field" style="margin-top:12px"><label for="ukqfb">Feedback on answers received</label><textarea id="ukqfb"></textarea></div>
-      </section>`;
-    if (step === 4) sec = `<section class="card" id="s-fb"><div class="card-head"><span class="step">4</span><h2>Assessment Feedback Form</h2></div>
-        <div class="field"><label for="dec">Decision and feedback</label><textarea id="dec" placeholder="What you saw, and how it met the criteria"></textarea></div>
-        <div class="field"><label>Has the candidate demonstrated competence in this activity?</label><div class="yn"><button class="y" data-yn>Yes</button><button data-yn>No</button></div></div>
-        <div class="field"><label>Has the candidate now demonstrated competence in three activities?</label><div class="yn"><button data-yn>Yes</button><button class="y" data-yn>No</button></div></div>
-        <div class="field"><label for="why">Reasons for your decision</label><textarea id="why"></textarea></div>
-        <div class="field"><label for="fa">Summary of further action for the candidate</label><textarea id="fa" placeholder="e.g. tide reduction and QC plots in Activity 3; S09d and S09f outstanding"></textarea></div>
-        <div class="field"><label>Candidate's comments</label><textarea readonly placeholder="Aidan adds these after you submit"></textarea></div>
-      </section>`;
-    if (step === 5) sec = `<section class="card" id="s-sign"><div class="card-head"><span class="step">5</span><h2>Check and sign</h2></div>
-        <div class="sum-box">
-          <div class="sum-line ${pend.length ? "warn" : "ok"}"><span>${pend.length ? "⚠️" : "✅"}</span><div class="grow"><b>${planned.length} criteria: ${coded} coded, ${pend.length} not coded yet</b>${pend.length ? `<div class="small muted">${pend.join(", ")}. Uncoded criteria are left blank on the sheets.</div>` : ""}</div>${pend.length ? `<button class="btn sm" data-ui="aStep" data-val="2">Review</button>` : ""}</div>
-          <div class="sum-line ${qMarked === qsData.length ? "ok" : "warn"}"><span>${qMarked === qsData.length ? "✅" : "⚠️"}</span><div class="grow"><b>Knowledge: ${qMarked} of ${qsData.length} questions marked</b></div><button class="btn sm" data-ui="aStep" data-val="3">Review</button></div>
-          <div class="sum-line ok"><span>✅</span><div class="grow"><b>Feedback Form: decision recorded</b></div><button class="btn sm" data-ui="aStep" data-val="4">Review</button></div>
-          <div class="sum-line ok"><span>✅</span><div class="grow"><b>Plan ${a.planAgreed ? "agreed " + esc(a.planAgreed) : "not agreed yet"}</b></div></div>
-        </div>
-        <p class="small">Signing records your name and the date on the 2 Assessment Plans, ${COMPS.length} competence sheets, the UKQ sheets and 2 Feedback Forms for Activity ${a.n}. Signed items are locked; a later edit needs a new signature.</p>
-        <div class="grid g-2" style="gap:10px"><div class="field"><label for="an">Your name</label><input id="an" value="[Assessor]"></div><div class="field"><label for="ar">Job role</label><input id="ar" value="Senior Surveyor"></div></div>
-        <div class="sigpad" aria-label="Signature pad">Sign here with your finger or mouse</div>
-        <label class="checkline"><input type="checkbox"> I confirm I assessed this activity as recorded above.</label>
-        <p class="tiny muted">The Assessor Sign Off form needs an ink signature. It is printed for you after Activity 3.</p>
-      </section>`;
-    return `<div class="link-shell">
-      <div class="link-hero"><div class="small" style="opacity:.85">Assessor view · shared by Aidan</div>
-        <h1 style="margin:4px 0 2px">Activity ${a.n} · ${esc(a.title)}</h1>
-        <div class="small" style="opacity:.9">${esc(PACK.name)} · ${esc(S.trip.vessel)} · ${esc(a.dates)}</div>
-        <div class="meta"><span class="pill">✓ Email code verified</span><span class="pill">Link expires 25 Oct 2026</span><span class="pill">${planned.length} criteria</span><span class="pill">${signed ? "Signed and locked" : "Not signed yet"}</span></div></div>
-      <nav class="section-nav steps" aria-label="Steps">${STEPS.map((l, i) => `<button data-ui="aStep" data-val="${i + 1}" class="${step === i + 1 ? "on" : ""}${i + 1 < step ? " done" : ""}" aria-current="${step === i + 1 ? "step" : "false"}">${i + 1} ${l}</button>`).join("")}</nav>
-      ${sec}
-      <div class="sticky-sign" style="margin-top:16px"><div class="small grow"><b>${planned.length} criteria</b><span class="muted"> · step ${step} of 5</span></div>
-        ${step > 1 ? `<button class="btn" data-ui="aStep" data-val="${step - 1}" aria-label="Back">‹</button>` : ""}
-        <button class="btn hide-sm" data-toast="Saved as a draft. Nothing is signed yet.">Save draft</button>
-        ${step < 5 ? `<button class="btn primary" data-ui="aStep" data-val="${step + 1}">Next: ${STEPS[step]} ›</button>` : `<button class="btn primary" ${signed ? "disabled" : ""} data-toast="Would sign and lock Activity ${a.n}.">${signed ? "Signed" : "Sign and lock"}</button>`}
-      </div>
-    </div>`;
-  }
-
-  // ---------- 7. Witness link view ----------
-  function viewWitness(n) {
-    const a = actOf(n) || S.activities[0];
-    const comps = COMPS.filter(c => c.criteria.some(k => cov(k.id, a.n)));
-    return `<div class="link-shell" style="max-width:760px">
-      <div class="link-hero" style="background:linear-gradient(135deg,#5b3d8a,#14213d)"><div class="small" style="opacity:.85">Witness view · shared by Aidan</div>
-        <h1 style="margin:4px 0 2px">Activity ${a.n} · ${esc(a.title)}</h1>
-        <div class="small" style="opacity:.9">${esc(S.trip.vessel)} · ${esc(a.dates)}</div>
-        <div class="meta"><span class="pill">✓ Email code verified</span><span class="pill">Named on the Assessment Plan</span></div></div>
-      <section class="card"><h2>What you're confirming</h2>
-        <div class="quote small">"I have witnessed the candidate completing activities as summarised on their Assessment Plans and associated competence documentation."</div>
-        <p class="small muted">From the MTCS Record of Witness Form. You only see the task summary, not client files or the assessor's notes.</p>
-        <dl class="kv small"><dt>Task</dt><dd>${esc(a.summary)}</dd><dt>Where</dt><dd>${esc(a.where)}</dd><dt>Assessor</dt><dd>[Assessor]</dd></dl>
-      </section>
-      <section class="card"><h2>Competences you saw</h2><p class="small muted">Tick the ones you witnessed in Activity ${a.n}. Each tick becomes your signature and date on that row.</p>
-        <ul class="list">${comps.map((c, i) => `<li><input type="checkbox" ${i < 9 ? "checked" : ""} style="width:22px;height:22px;accent-color:var(--brand);flex:none" aria-label="${compLabel(c)}"><div class="grow"><b class="small">${compLabel(c)}</b><div class="small muted">${esc(c.title)}</div></div></li>`).join("")}</ul>
-      </section>
-      <section class="card"><h2>Your details</h2>
-        <div class="grid g-2" style="gap:10px">
-          <div class="field"><label for="wn">Witness name</label><input id="wn" value="[Witness]"></div>
-          <div class="field"><label for="wr">Job role</label><input id="wr" value="Party Chief"></div>
-          <div class="field"><label for="we">Email</label><input id="we" value="[witness email]"></div>
-          <div class="field"><label for="wp">Contact number</label><input id="wp" placeholder="+44 …"></div>
-        </div>
-        <p class="tiny muted">MTCS may email you to confirm you completed this form.</p>
-        <div class="field"><label>Optional comment</label><textarea placeholder="Anything the assessor should know"></textarea></div>
-        <div class="sigpad">Sign here</div>
-        <label class="checkline"><input type="checkbox"> I confirm the above is correct.</label>
-        <button class="btn primary block" style="margin-top:10px" data-toast="Would sign the witness rows for Activity ${a.n}.">Sign witness rows</button>
-      </section></div>`;
-  }
-
-  // ---------- 8. Export ----------
-  function viewExport() {
-    const t = totals();
-    const f = (name, st, note) => `<div class="file-line"><span aria-hidden="true">📄</span><div class="grow"><span class="fname" style="color:var(--ink)">${name}</span>${note ? `<div class="tiny muted">${note}</div>` : ""}</div>${st === "ready" ? `<span class="pill signed">Ready</span>` : st === "wait" ? `<span class="pill mapped">Awaiting signature</span>` : st === "ink" ? `<span class="pill warn">Ink, scan needed</span>` : `<span class="pill planned">Not started</span>`}</div>`;
-    const area = (n, title, files, note) => `<section class="card"><div class="area"><div class="n">${n}</div><div><h3 style="margin:4px 0 2px">${title}</h3>${note ? `<p class="small muted" style="margin:0 0 8px">${note}</p>` : ""}${files}</div>
-      <div class="area-act"><button class="btn sm" data-toast="Would preview the merged PDF.">Preview</button><a class="btn sm ghost" href="#/forms">Blank forms (MTCS)</a></div></div></section>`;
-    const acts = (label, sts) => [1, 2, 3].map(i => f(`Activity ${i} - ${label}.pdf`, sts[i - 1])).join("");
-    const blockers = [
-      ["gap", `${t.gap} criteria with a gap: S09d, S09f`, "#/matrix?c=S09d"],
-      ["mapped", "Activity 2 awaiting assessor signature", "#/activity/2"],
-      ["planned", `Activity 3 evidence in progress (${CRITS.filter(k => cov(k.id, 3) && cov(k.id, 3).state !== "planned").length} of ${CRITS.filter(k => cov(k.id, 3)).length})`, "#/activity/3"],
-      ["mapped", "Record of Witness: [Witness] to sign Activity 1 rows", "#/witness/1"],
-      ["planned", "Assessor Sign-off (ink) after Activity 3", "#/export"],
-      ["planned", "2 Witness Statements from referees", "#/export"]
-    ];
-    return `
-    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Export for MTCS Online</h1>
-      <p class="muted" style="margin:0">One zip per MTCS course, laid out by upload area. You upload it to MTCS Online yourself.</p></div>
-      <div class="actions"><button class="btn" data-toast="Would build the print pack: Sign-off and Record of Witness, pre-filled for ink.">Print pack for ink signatures</button><button class="btn primary" disabled style="opacity:.55;cursor:not-allowed" title="Available when the checklist is complete">Build zip</button></div></div>
-    <div class="seg" style="margin-bottom:16px"><button class="on">G2 Surveyor course</button><button data-toast="Would switch to the G2 Core course export.">G2 Core course</button></div>
-    <div class="grid g-main">
-      <div class="stack">
-        ${area(1, "Assessment Plans and Feedback Forms", acts("Assessment Plan and Feedback Form", ["ready", "wait", "draft"]), "One merged PDF per activity: the plan plus the feedback form.")}
-        ${area(2, "Performance Criteria completed over at least three activities", acts("Performance Criteria", ["ready", "wait", "draft"]), "10 competence sheets per activity, pre-filled with codes, names and dates.")}
-        ${area(3, "Underpinning knowledge documents", f("Underpinning Knowledge Questions S01–S10.pdf", "draft", "10 UKQ sheets (one per competence). Per-activity sheets are also supported."), "")}
-        ${area(4, "Assessor sign off form & Record of Witness Form", f("Competence Assessment Sign Off Sheet.pdf", "ink", "Original signature, scanned") + f("Record of Witness - [Witness].pdf", "ink") + f("Assessor Contact Details.pdf", "ready"), "")}
-        ${area(7, "Candidate Statement", f("Candidate Testimony - A1 SVP cast.pdf", "ready") + f("Candidate Testimony - S08f LBL (historic).pdf", "draft"), "")}
-        <section class="card" style="background:#f8fafc"><h3>Supporting evidence</h3><p class="small muted">Witness Statements, medical and survival certificates, logbook pages. Which upload area these go in isn't confirmed (areas 5 and 6 aren't in the pack). Check on MTCS Online.</p>
-          ${f("Witness Statement - [Shore manager].pdf", "draft")}${f("Witness Statement - [Offshore manager].pdf", "draft")}${f("Medical and Survival certificates.pdf", "ready")}${f("IMCA logbook pages Oct 2026.pdf", "draft")}</section>
-      </div>
-      <div class="stack">
-        <section class="card"><div class="card-head"><h2>Before you export</h2><span class="right pill gap">${blockers.length} to do</span></div>
-          <ul class="list small">${blockers.map(b => `<li><span class="dot" style="background:${b[0] === "gap" ? "var(--gap)" : b[0] === "mapped" ? "#e08a1e" : "#b7c0cd"}"></span><div class="grow">${b[1]}</div><a class="btn sm ghost" href="${b[2]}">Go</a></li>`).join("")}</ul></section>
-        <section class="card"><h2>Checks the export will run</h2><ul class="list small">
-          <li><span>✅</span><div class="grow">Every competence appears in 3 activities</div></li>
-          <li><span>⚠️</span><div class="grow">Every criterion covered at least once (2 missing)</div></li>
-          <li><span>✅</span><div class="grow">Direct evidence ${t.directPct}% (70% minimum)</div></li>
-          <li><span>✅</span><div class="grow">Files named by activity and competence</div></li>
-          <li><span>✅</span><div class="grow">Mac and Windows junk files removed</div></li>
-          <li><span>⚠️</span><div class="grow">2 items flagged to check for client data</div></li></ul></section>
-        <section class="card"><h2>Official forms</h2><p class="small muted">The app fills in the official MTCS PDFs and leaves them unaltered. It never submits to MTCS and never signs for anyone.</p></section>
-      </div>
-    </div>`;
-  }
-
-  // ---------- 9. Settings ----------
-  function viewSettings() {
-    const ar = roleOf(ui.active.role), G = ar.grades[ui.active.grade];
-    const roles = ["Surveyor", "Survey Engineer", "Data Processor", "Survey Party Chief", "Client Representative"];
-    const packs = window.PACK_CATALOGUE;
-    const roleBlock = r => `<div><h3 style="margin:14px 0 8px">${r}</h3><div class="grid g-3">${packs.filter(p => p.role === r).map(p => `
-      <div class="pack ${p.status === "active" ? "active" : "later"}">
-        <div style="display:flex;align-items:center;gap:8px"><b>${esc(p.label)}</b><span class="pill ${p.status === "active" ? "signed" : "planned"}" style="margin-left:auto">${p.status === "active" ? "Loaded" : "Coming soon"}</span></div>
-        <div class="small">GA course ${p.gaCourse}${CORE_COURSE[p.grade] ? ` · Core course ${CORE_COURSE[p.grade]}` : ""}${p.note ? " · " + esc(p.note) : ""}</div>
-        ${p.status === "active" ? `<div class="small">${COMPS.length} competences · ${CRITS.length} criteria · ${TPL.filter(t => t.pack !== "guidance").length} MTCS forms linked</div>` : `<div class="small">Criteria not loaded yet</div>`}
-      </div>`).join("")}</div></div>`;
-    return `
-    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Settings</div><h1>Settings</h1></div></div>
-    <div class="grid g-main">
-      <div class="stack">
-        <section class="card"><div class="card-head"><h2>Your route</h2><a class="right btn sm primary" href="#/">Change route</a></div>
-          <div class="rs-title">${esc(routeName(ar, ui.active.grade))} <span class="plus">+</span> ${esc(coreName(ar, ui.active.grade))}</div>
-          <div class="rs-meta" style="margin-top:8px"><span class="pill info">GA course ${G.course}</span>${ar.single ? "" : `<span class="pill info">Core course ${CORE_COURSE[ui.active.grade]}</span>`}${G.pack ? `<span class="pill signed">Criteria loaded: ${COMPS.length} competences, ${CRITS.length} criteria</span>` : `<span class="pill warn">Criteria pack not loaded yet</span>`}</div>
-        </section>
-        <section class="card"><div class="card-head"><h2>Forms pack</h2><a class="right btn sm" href="#/forms">Forms and templates</a></div>
-          ${packBanner("settings")}
-          <p class="tiny muted" style="margin:8px 0 0">Stored originals stay unchanged. Filled copies are saved separately in your portfolio (later, when wired).</p>
-        </section>
-        <section class="card"><div class="card-head"><h2>Competence packs</h2><span class="right small muted hide-sm">Packs are data files, so new roles and grades slot in later</span></div>
-          ${roles.map(roleBlock).join("")}
-        </section>
-      </div>
-      <div class="stack">
-        <section class="card"><h2>Profile</h2>
-          <div class="field"><label for="pn">Name</label><input id="pn" value="Aidan"></div>
-          <div class="field"><label for="pr">Current role</label><input id="pr" value="Online Surveyor"></div>
-          <div class="field"><label for="pe">Employer</label><input id="pe" value="[Company]"></div>
-          <div class="field"><label for="pt">Current trip</label><input id="pt" value="${esc(S.trip.vessel)} · ${esc(S.trip.project)}"></div>
-        </section>
-        <section class="card"><h2>Links</h2>
-          <div class="field"><label for="le">Assessor link expires after</label><select id="le"><option>14 days</option><option>7 days</option><option>30 days</option></select></div>
-          <label class="checkline"><input type="checkbox" checked> Ask for an email code when a link is opened</label>
-          <label class="checkline"><input type="checkbox" checked> Witnesses see task summaries only</label>
-        </section>
-        <section class="card"><h2>Backup</h2><p class="small muted">Last backup ${backupDays()} days ago. Your data lives in this browser.</p>
-          <div class="btn-row"><a class="btn primary" href="#/backup">Backup and restore</a></div>
-          <label class="checkline"><input type="checkbox" data-ui="staleBackup" data-val="toggle" ${ui.staleBackup ? "checked" : ""}> Prototype only: pretend the last backup was 9 days ago</label></section>
-        <section class="card"><h2>About this prototype</h2>
-          <p class="small">This is a layout prototype for discussion. It is <b>not affiliated with or endorsed by MTCS or IMarEST</b>. All names, dates and evidence are sample data. Nothing is saved, sent or signed.</p>
-          <p class="small muted">The official MTCS forms listed under Forms and templates are © MTCS Ltd and are not hosted here: each button opens the download on MTCS Online. The app never submits to MTCS and never signs for anyone.</p></section>
-        <section class="card"><h2>Assessor training</h2><p class="small muted">Later: an assessor side to track your own Stage 2 candidates.</p><span class="pill planned">Coming soon</span></section>
-      </div>
-    </div>`;
-  }
-
-  // ---------- 11. More (phone) ----------
-  function viewMore() {
-    const r = (href, ico, t, s, badge) => `<a class="more-row" href="${href}"><span class="opt-ico" aria-hidden="true">${ico}</span><span class="grow"><b>${t}</b><span class="small muted">${s}</span></span>${badge || ""}<span class="chev" aria-hidden="true">›</span></a>`;
-    return `<div class="page-head"><div><h1>More</h1></div></div>
-    <section class="card more-list">
-      ${r("#/backup", "☁", "Backup and restore", `Last backup ${backupDays()} days ago`, backupDays() > 7 ? `<span class="pill gap">${backupDays()} days</span>` : "")}
-      ${r("#/export", "⇪", "Export for MTCS", "Zip by upload area, checklist")}
-      ${r("#/forms", "📄", "Forms and templates", "Links to the official MTCS forms")}
-      ${r("#/", "⇄", "Shared with me", "Import an activity zip someone sent you")}
-      ${r("#/matrix?f=all", "▦", "Coverage matrix (all)", "All 79 criteria × 3 activities")}
-      ${r("#/settings", "⚙", "Settings", "Route, packs, profile, links, about")}
-      ${r("#/", "⇄", "Change route", "Pick another role or grade")}
-    </section>`;
-  }
-
-  // ---------- 12. Forms and templates ----------
-  function viewForms() {
-    const areas = PACK.uploadAreas;
-    const row = t => `<li>${tplLink(t, null, `<span class="pill ${t.both ? "signed" : t.unit === "core" ? "info" : "planned"} unit-pill">${t.both ? "Both units" : t.unit === "core" ? "G2 Core" : "G2 Surveyor"}</span>`)}</li>`;
-    const dedupe = list => { const seen = {}; return list.filter(t => { if (seen[t.sha256]) { seen[t.sha256].both = true; return false; } seen[t.sha256] = t; return true; }); };
-    const byArea = n => dedupe(TPL.filter(t => t.area === n && t.kind !== "readme").map(t => Object.assign({}, t)));
-    const packCard = (key, title, zipName) => { const P = MP[key] || {}; return `<section class="card pack-card">
-      <div class="card-head"><span class="imp-ico" aria-hidden="true">🗜️</span><h2>${title}</h2><span class="right pill planned">${packCount(key)} files</span></div>
-      <div class="fname" style="margin-bottom:10px">${zipName}</div>
-      <ol class="pack-steps">
-        <li><span class="step">1</span><div class="grow"><b>Download pack from MTCS</b><div class="small muted">Opens MTCS Online in a new tab and saves the zip from MTCS to this device.</div></div><a class="btn primary" href="${esc(P.zip || "")}" target="_blank" rel="noopener">Download pack from MTCS ↗</a></li>
-        <li><span class="step">2</span><div class="grow"><b>Import downloaded pack (.zip)</b><div class="small muted">Pick that same zip. The app unpacks it in this browser (layout only here).</div></div><button class="btn" data-toast="Layout only: no file is read or stored yet. Later you'd pick the zip you just downloaded.">Import downloaded pack (.zip)</button></li>
-        <li><span class="step">3</span><div class="grow"><b>Status</b><div class="pack-status not-imported"><b>Forms pack: not imported yet</b><span class="small">Download at portfolio start, then import above.</span></div></div></li>
-      </ol>
-      <p class="tiny muted" style="margin:8px 0 0">Stored originals stay unchanged; filled copies are saved separately in your portfolio.</p>
-    </section>`; };
-    return `
-    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Forms and templates</h1>
-      <p class="muted" style="margin:0">${MTCS_NOTE}</p>
-      <p class="small" style="margin:8px 0 0">At the start of compiling your portfolio, download the current pack once. The app then uses those blank templates throughout, and a weekly check can flag "pack update available" if MTCS publishes a newer revision.</p></div></div>
-
-    <div class="grid g-2 pack-grid">
-      ${packCard("g2-surveyor", "G2 Surveyor – All Files.zip", "G2Surveyor - All Files.zip")}
-      ${packCard("g2-core", "G2 Core – All Files.zip", "G2CoreComp - All Files.zip")}
-    </div>
-
-    <div class="pack-example" role="note"><span class="pill planned">Example</span><div class="small"><b>How the status will look once imported (sample only, not your data):</b><br>
-      Imported 12 Oct 2026 · ${packCount("g2-surveyor")} files · Pack rev: MTCS 2026 forms · Last update check 17 Oct 2026 · <b>Up to date</b>. If MTCS publishes a newer pack, this banner shows <b>"Update available"</b> instead.</div></div>
-
-    <p class="small muted" style="margin:14px 2px">Prefer forms one at a time? Each form below still has a "Download from MTCS" link. ${MP.howTo ? `<a href="${esc(MP.howTo.url)}" target="_blank" rel="noopener">How MTCS says to get the forms ↗</a>` : ""}</p>
-
-    <h2 class="sec-h">Forms in the packs</h2>
-    <div class="stack">
-      <section class="card"><div class="card-head"><h2>Start here</h2></div><ul class="list tpl-ul">
-        ${dedupe(TPL.filter(t => t.kind === "readme").map(t => Object.assign({}, t))).map(row).join("")}${TPL.filter(t => t.kind === "guidance").map(t => `<li>${tplLink(t, null, `<span class="pill planned unit-pill">MTCS guidance</span>`)}</li>`).join("")}</ul></section>
-      ${areas.map(a => `<section class="card"><div class="area"><div class="n">${a.n}</div><div><h3 style="margin:4px 0 2px">${esc(a.name)}</h3>
-        <p class="tiny muted" style="margin:0 0 6px">MTCS Online upload area ${a.n}${a.n === 2 ? ": one competence sheet per competence, used once per activity" : a.n === 3 ? ": blank sheets, the assessor writes the questions" : a.n === 4 ? ": Sign Off needs an original ink signature (scanned). Witness Statements are referee forms." : ""}</p></div></div>
-        <ul class="list tpl-ul">${byArea(a.n).map(row).join("")}</ul></section>`).join("")}
-    </div>`;
-  }
-
-  // ---------- 0. Opening screen: choose your route ----------
-  function viewLanding(params) {
-    const sel = params.get("role"), selGrade = params.get("grade"), showAll = params.get("all") === "1";
-    const t = totals();
-    const card = r => {
-      const open = sel === r.key;
-      const gkeys = Object.keys(r.grades);
-      const g = r.single ? gkeys[0] : (open && r.grades[selGrade] ? selGrade : null);
-      const anyLoaded = gkeys.some(k => r.grades[k].pack);
-      let inner = "";
-      if (open) {
-        const seg = r.single
-          ? `<div class="grade-seg single"><button class="on" aria-pressed="true" disabled>Single level</button></div><p class="tiny muted" style="margin:6px 0 0">MTCS has one level for this role.</p>`
-          : `<div class="grade-seg" role="group" aria-label="Grade">${gkeys.map(k => `<button data-href="#/?role=${r.key}&grade=${k}" aria-pressed="${k === g}" class="${k === g ? "on" : ""}">${k}${r.grades[k].pack ? "" : `<span class="soon">soon</span>`}</button>`).join("")}</div>`;
-        let summary = `<p class="small muted" style="margin:10px 0 0">Pick the grade you're working towards.</p>`;
-        if (g) {
-          const G = r.grades[g];
-          summary = `<div class="route-summary">
-            <div class="tiny muted" style="text-transform:uppercase;letter-spacing:.06em">Your route</div>
-            <div class="rs-title">${esc(routeName(r, g))} <span class="plus">+</span> ${esc(coreName(r, g))}</div>
-            <p class="small" style="margin:6px 0 0">${r.single ? "Which Core unit goes with this role still needs confirming with MTCS." : `${g} Core${g === "G2" ? " (C1–C3)" : ""} included, done once for all ${g} roles.`}</p>
-            ${G.pack ? "" : `<p class="small" style="margin:6px 0 0;color:var(--warn)"><b>Coming soon:</b> criteria for this route aren't loaded yet. You can preview the layout.</p>`}
-            <button class="btn primary block lg" data-open="${r.key}|${g}" style="margin-top:12px">${G.pack ? "Open portfolio →" : "Open layout preview →"}</button>
-          </div>`;
-        }
-        inner = `<div class="role-body">${seg}${summary}</div>`;
-      }
-      return `<section class="role-card${open ? " open" : ""}" id="role-${r.key}">
-        <button class="role-head" data-href="${open ? "#/?role=" : "#/?role=" + r.key}" aria-expanded="${open}">
-          <span class="role-ico" aria-hidden="true">${r.ico}</span>
-          <span class="grow"><b>${esc(r.name)}</b><span class="small muted">${esc(r.blurb)}</span>
-            <span class="tiny muted">${r.single ? "Single level" : "G2 · G1 · Senior"}</span></span>
-          ${anyLoaded ? `<span class="pill signed">Available</span>` : `<span class="pill planned">Coming soon</span>`}
-          <span class="chev" aria-hidden="true">${open ? "▴" : "▾"}</span>
-        </button>${inner}</section>`;
-    };
-    const avail = r => Object.values(r.grades).some(G => G.pack);
-    // Once a role is open, roles that are only "coming soon" collapse into one line.
-    const collapse = sel && !showAll;
-    const shown = collapse ? ROLES.filter(r => r.key === sel || avail(r)) : ROLES;
-    const folded = collapse ? ROLES.filter(r => !shown.includes(r)) : [];
-    return `<div class="landing">
-      <div class="landing-hero"><div class="small" style="opacity:.85">Hi Aidan</div>
-        <h1>Choose your MTCS route</h1>
-        <p style="margin:4px 0 0;opacity:.92">Tap your role, then pick the grade. The matching Core competences are included automatically.</p></div>
-
-      <section class="card my-ports"><div class="card-head"><h2>My portfolios</h2><span class="right small muted">1 in progress</span></div>
-        <div class="port-row">
-          <div class="role-ico sm" aria-hidden="true">🧭</div>
-          <div class="grow"><b>G2 Surveyor + G2 Core</b><div class="small muted">${t.signed} of ${CRITS.length} signed · ${t.gap} gaps · Activity 2 with assessor</div>
-            <div class="bar" style="margin-top:6px"><span class="s" style="width:${100 * t.signed / CRITS.length}%"></span><span class="m" style="width:${100 * t.mapped / CRITS.length}%"></span><span class="p" style="width:${100 * t.planned / CRITS.length}%"></span></div></div>
-          <button class="btn primary" data-open="surveyor|G2">Open</button>
-        </div>
-        <p class="tiny muted" style="margin:10px 0 0">You can keep more than one route, for example G2 Surveyor now and G1 later.</p>
-      </section>
-
-      <h2 class="landing-h2" id="switch">Start or switch route</h2>
-      <div class="role-list">${shown.map(card).join("")}
-        ${folded.length ? `<a class="soon-line" href="#/?role=${sel}${selGrade ? "&grade=" + selGrade : ""}&all=1"><span class="pill planned">Coming soon</span><span class="grow small">${folded.map(r => esc(r.name)).join(" · ")}</span><span class="chev" aria-hidden="true">▾</span></a>` : ""}
-      </div>
-
-      <section class="card shared-card" id="shared"><div class="card-head"><span class="imp-ico" aria-hidden="true">⇄</span><h2>Shared with me</h2><span class="right pill info">${SHARED.length} sample</span></div>
-        <p class="small" style="margin:0 0 8px">Has someone sent you an activity to review? You don't need their portfolio or an account. Import their activity zip here: it opens as a separate imported copy in this browser. Review, edit and sign it, then export a return zip and send it back any way you like (email, message, USB).</p>
-        <div class="btn-row"><button class="btn primary" data-toast="Layout only: no zip is read yet. Later you'd pick the .zip you were sent.">⤒ Import activity zip (.zip)</button></div>
-        <div class="shared-list">${SHARED.map(sharedRow).join("")}</div>
-        <p class="tiny muted" style="margin:8px 0 0">Imported copies stay separate from your own portfolios. Sample data only.</p>
-      </section>
-
-      <section class="card import-card"><div class="card-head"><span class="imp-ico" aria-hidden="true">⤒</span><h2>Lost your data? Import a backup</h2></div>
-        <p class="small" style="margin:0 0 6px">Your portfolio is stored <b>in this browser on this device</b>. If the browser data is cleared, or you move to a new phone or laptop, import your backup <b>.zip</b> and everything is restored.</p>
-        <div class="btn-row"><button class="btn primary" data-toast="Not connected yet – layout only. Would open the file picker for a backup .zip.">⤒ Import backup (.zip)</button><a class="btn" href="#/backup">More restore options</a></div>
-      </section>
-    </div>`;
-  }
-
-  // ---------- 10. Backup and restore ----------
-  function viewBackup() {
-    const NC = "Not connected yet – layout only.";
-    const place = (ico, title, status, btn, toastMsg, primary) => `<div class="place-row"><span class="opt-ico" aria-hidden="true">${ico}</span><div class="grow"><b>${title}</b><div class="small muted">${status}</div></div><button class="btn sm ${primary ? "primary" : ""}" data-toast="${NC} ${toastMsg}">${btn}</button></div>`;
-    const stale = backupDays() > 7;
-    return `
-    <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Backup and restore</h1></div></div>
-
-    <section class="card status-card ${stale ? "stale" : ""}"><div class="st-row"><span class="st-dot ${stale ? "bad" : "ok"}" aria-hidden="true"></span><div class="grow"><b>Last backup ${backupDays()} days ago</b><div class="small muted">${backupWhen()} · this device and Google Drive · 48 MB</div></div></div>
-      <button class="btn primary block lg" style="margin-top:12px" data-toast="${NC} Would back up to every place switched on below.">Back up now</button>
-      <p class="tiny muted" style="margin:8px 0 0">Your portfolio lives in this browser on this device. A backup is how you get it back if the browser data is cleared or the phone is replaced.</p></section>
-
-    <h2 class="sec-h">Back up to</h2>
-    <section class="card places">
-      ${place("📱", "This device (.zip)", `Last saved ${backupWhen()}`, "Save backup to this device (.zip)", "Would download MTCS_Backup_[date].zip to Downloads.", true)}
-      ${place("🟢", "Google Drive", "Connected (sample) · MTCS Portfolio/Backups", "Back up", "Would upload the backup to Google Drive.")}
-      ${place("🔵", "OneDrive", "Not connected", "Connect", "Would ask you to sign in to Microsoft.")}
-    </section>
-
-    <h2 class="sec-h">Restore</h2>
-    <section class="card restore-card">
-      <button class="restore-tile primary block" data-toast="${NC} Would open the file picker for a backup .zip."><span class="opt-ico" aria-hidden="true">⤒</span><span><b>Restore from local zip</b><span class="small">Pick a backup .zip from this device</span></span></button>
-      ${place("🟢", "From Google Drive", "Choose a backup from Drive", "Choose", "Would list backups in Google Drive.")}
-      ${place("🔵", "From OneDrive", "Not connected", "Connect", "Would ask you to sign in to Microsoft.")}
-      <p class="tiny muted" style="margin:10px 0 0">Importing a backup restores routes, activities, evidence files, signatures with their audit trail, and settings. You see what's in it before anything in this browser is replaced.</p>
-    </section>
-
-    <div class="grid g-2" style="margin-top:16px">
-      <section class="card"><div class="card-head"><h2>Automatic backup</h2>
-        <label class="switch right"><input type="checkbox" checked><span class="slider" aria-hidden="true"></span><span class="sr-only">Automatic backup</span></label></div>
-        <div class="field"><label for="bf">How often</label><select id="bf"><option>Daily</option><option>After every change</option><option>Weekly</option><option>Only when I tap Back up now</option></select></div>
-        <div class="field"><label for="bd">Where</label><select id="bd"><option>This device (.zip)</option><option>Google Drive</option><option>OneDrive</option><option>All connected places</option></select></div>
-        <div class="field"><label for="bk">Keep</label><select id="bk"><option>Last 5 backups</option><option>Last 10 backups</option><option>All backups</option></select></div>
-        <label class="checkline"><input type="checkbox" checked> Only on Wi-Fi (saves offshore data allowance)</label>
-        <label class="checkline"><input type="checkbox" checked> Remind me if there's no backup for 7 days</label>
-      </section>
-      <section class="card"><h2>What's in a backup</h2>
-        <ul class="list small">
-          <li><span>✅</span><div class="grow">Routes and activities, plans, codes and notes</div></li>
-          <li><span>✅</span><div class="grow">Evidence files (photos, logs, written products)</div></li>
-          <li><span>✅</span><div class="grow">Signatures and the audit trail</div></li>
-          <li><span>✅</span><div class="grow">Settings and the loaded criteria packs</div></li>
-          <li><span>✅</span><div class="grow">Shared (imported) activities and version-history snapshots</div></li>
-        </ul>
-        <p class="tiny muted">The backup holds your evidence, so keep it somewhere private. Check that client data is allowed to leave the vessel before backing up to the cloud.</p>
-      </section>
-    </div>`;
-  }
-
-  // ---------- 13. Shared activity (imported copy, not your portfolio) ----------
-  function viewShared(n) {
-    const x = sharedOf(n);
-    const a = actOf(x.n) || S.activities[1];
-    return `<div class="link-shell">
-      <div class="imported-banner" role="note"><b>Imported copy — not your portfolio.</b><span>Changes here only affect this imported copy in this browser. Nothing is merged into your own portfolios. When you're done, export a reviewed zip and send it back to the candidate.</span></div>
-      <div class="link-hero shared"><div class="small" style="opacity:.85">Shared with me · imported activity</div>
-        <h1 style="margin:4px 0 2px">Activity ${x.n} · ${esc(x.title)}</h1>
-        <div class="small" style="opacity:.9">Candidate: ${esc(x.candidate)} · ${esc(x.route)} · ${esc(x.dates)}</div>
-        <div class="meta"><span class="pill">${x.statusLabel}</span><span class="pill">${x.criteria} criteria</span><span class="pill">${x.files} evidence files</span></div></div>
-
-      <section class="card"><div class="card-head"><h2>Package details</h2><span class="right pill info">manifest.json</span></div>
-        <dl class="kv small">
-          <dt>Exported by</dt><dd>${esc(x.exportedBy)}</dd><dt>Exported</dt><dd>${esc(x.exportedAt)}</dd>
-          <dt>Package version</dt><dd>v${x.pkg} (export sequence ${x.pkg})</dd><dt>Based on</dt><dd>Candidate activity v${x.basedOn}</dd>
-          <dt>App version</dt><dd>${esc(x.app)}</dd><dt>IDs</dt><dd class="fname">portfolio: sample-pf-001 · activity: sample-act-${x.n}</dd>
-          <dt>Files & hashes</dt><dd>${x.files} evidence files listed in manifest.json with SHA-256 hashes · <b>All hashes verified on import</b></dd>
-        </dl>
-        <p class="tiny muted" style="margin:8px 0 0">Hashes detect missing or changed files. If a file is missing or its hash doesn't match, the import review warns you before anything is applied.</p>
-      </section>
-
-      <section class="card"><div class="card-head"><h2>Review this activity</h2><span class="right small muted">${esc(x.progress)}</span></div>
-        <div class="review-actions">
-          ${[["1", "Plan", "Read and agree the Assessment Plan", "#/assessor/" + x.n + "?step=1"], ["2", "Criteria", "Code criteria O/P/W/Q/N/C/N/A against the evidence", "#/assessor/" + x.n + "?step=2"], ["3", "Knowledge", "Record underpinning-knowledge questions and answers", "#/assessor/" + x.n + "?step=3"], ["4", "Feedback", "Fill in the Assessment Feedback Form", "#/assessor/" + x.n + "?step=4"], ["5", "Sign", "Check the summary, then sign and lock", "#/assessor/" + x.n + "?step=5"]].map(r => `<a class="review-row" href="${r[3]}"><span class="step">${r[0]}</span><span class="grow"><b>${r[1]}</b><span class="small muted">${r[2]}</span></span><span class="chev" aria-hidden="true">›</span></a>`).join("")}
-        </div>
-        <div class="field" style="margin-top:12px"><label for="ac">Your comments (saved in this imported copy)</label><textarea id="ac" placeholder="e.g. S09c coded from verification report; two questions still to ask"></textarea></div>
-      </section>
-
-      <section class="card return-card"><div class="card-head"><h2>Send it back</h2></div>
-        <p class="small" style="margin:0 0 8px">Export one zip with your codes, comments, feedback and signatures, plus an updated manifest.json (new export sequence, based on v${x.basedOn}). Send it by email, message or USB. The candidate reviews the changes before anything is applied to their portfolio.</p>
-        <button class="btn primary block lg" data-toast="Layout only: no zip is created yet.">⤓ Export reviewed activity zip (.zip)</button>
-        <p class="tiny muted" style="margin:8px 0 0">Layout only: importing and exporting zips are not wired in this prototype.</p>
-      </section>
-    </div>`;
-  }
-
-  // ---------- 14. Pre-import review / merge ----------
-  function mergeModal(n) {
-    const a = actOf(n) || S.activities[1];
-    const back = "#/activity/" + a.n;
-    const row = (label, expected, received, cls) => `<div class="cmp-row ${cls || ""}"><span class="cmp-l">${label}</span><span class="cmp-e">${expected}</span><span class="cmp-r">${received}</span></div>`;
-    return `<div class="scrim" data-href="${back}"></div>
-    <div class="modal merge" role="dialog" aria-label="Review assessor return before importing">
-      <header><div><h2 style="margin:0">Review before you import</h2><p class="small muted" style="margin:4px 0 0">Activity ${a.n} · ${esc(a.title)}</p></div><button class="close" data-href="${back}" aria-label="Close">✕</button></header>
-      <div class="body">
-        <p class="small" style="margin:0 0 10px"><span class="fname">Activity${a.n}_assessor-return_v4.zip</span> from [Assessor]. <b>Import never silently overwrites.</b> Nothing changes until you choose below.</p>
-
-        <div class="cmp-head cmp-row"><span class="cmp-l"></span><span class="cmp-e">Expected (yours)</span><span class="cmp-r">Received</span></div>
-        ${row("Package based on", "Your current activity v3", "Candidate v2", "warn")}
-        ${row("Criteria changed", "—", "29 of 31 coded or signed", "ok")}
-        ${row("Assessor comments", "0", "+6 comments, 1 feedback form", "ok")}
-        ${row("Signatures", "0 signed by assessor", "+29 criteria signed, feedback signed", "ok")}
-        ${row("Evidence items", "5 files", "5 files · 0 removed", "ok")}
-        ${row("File hashes (SHA-256)", "5 in manifest", "5 verified · 0 missing", "ok")}
-
-        <div class="warn-box"><b>⚠️ Warnings</b><ul class="small">
-          <li><b>Based on an older version:</b> this return is based on your v2, but your activity is now v3. You edited 2 criteria after v2 (S06b note, S05c evidence link). Applying applies the assessor's changes as a new version on top; your 2 edits are kept and listed after import.</li>
-          <li>No warning: signed and evidence counts have not gone down, and no files are missing.</li>
-        </ul></div>
-        <p class="tiny muted">If a return had fewer signed or evidence items, missing files, or a hash mismatch, that would be listed here as a warning too.</p>
-
-        <details class="manifest"><summary><b class="small">What's in manifest.json (sample)</b></summary>
-          <pre class="manifest-pre">{
-  "portfolioId": "sample-pf-001", "activityId": "sample-act-${a.n}",
-  "candidate": "[Candidate]", "assessor": "[Assessor]",
-  "exportSeq": 4, "baseVersion": 2, "appVersion": "0.2-layout",
-  "exportedAt": "2026-10-17T14:20:00+01:00",
-  "criteria": [{ "id": "S01a", "code": "O", "state": "signed" }, "…"],
-  "files": [{ "name": "S05d_A2_OnlineLog_20261008.pdf",
-              "sha256": "9f2c…a41b" }, "…"]
-}</pre>
-          <p class="tiny muted" style="margin:6px 0 0">SHA-256 hashes detect missing or changed files before anything is applied.</p>
-        </details>
-
-        <label class="checkline backup-first"><input type="checkbox" checked> <span><b>Create backup zip first (recommended)</b><span class="small muted" style="display:block">Saves a backup of your whole portfolio before applying. On by default.</span></span></label>
-      </div>
-      <footer class="merge-foot">
-        <a class="btn" href="${back}">Cancel</a>
-        <button class="btn" data-toast="Layout only: no copy is saved yet.">Save as separate copy</button>
-        <button class="btn primary" data-toast="Layout only: nothing is imported or changed yet.">Import and apply</button>
-      </footer>
-      <p class="tiny muted" style="padding:0 20px 16px;margin:0">Applying makes this activity v4 on top of your v3. Your previous version stays under Version history with <b>Restore previous version</b>, so you can roll back. Layout only: no zip is read or applied in this prototype.</p>
-    </div>`;
-  }
-
-  // ---------- Send modal ----------
-  function sendModal(n) {
-    const a = actOf(n) || S.activities[1];
-    const back = location.hash.split("?")[0];
-    return `<div class="scrim" data-href="${back}"></div>
-    <div class="modal" role="dialog" aria-label="Send activity link">
-      <header><div><h2 style="margin:0">Send Activity ${a.n} to your assessor</h2><p class="small muted" style="margin:4px 0 0">They get a link and an email code. Nothing to install.</p></div><button class="close" data-href="${back}" aria-label="Close">✕</button></header>
-      <div class="body">
-        <div class="nudge ${backupDays() > 7 ? "" : "soft"}"><span aria-hidden="true">☁</span><div class="grow"><b>Back up before you share?</b><div class="small">Last backup ${backupDays()} days ago. The assessor's signatures will come back into this browser.</div></div><button class="btn sm" data-toast="Not connected yet – layout only.">Back up now</button></div>
-        <div class="field"><label for="to">Assessor email</label><input id="to" value="[assessor email]"></div>
-        <div class="field"><label>Who is it for?</label><div class="seg"><button class="on">Assessor</button><button>Witness</button></div></div>
-        <div class="field"><label>They can</label>
-          <label class="checkline"><input type="checkbox" checked> View the plan, evidence and criteria</label>
-          <label class="checkline"><input type="checkbox" checked> Code criteria and record questions</label>
-          <label class="checkline"><input type="checkbox" checked> Fill in the Feedback Form and sign</label>
-          <label class="checkline"><input type="checkbox"> Download original files</label></div>
-        <div class="grid g-2" style="gap:10px"><div class="field"><label for="exp">Expires</label><select id="exp"><option>In 14 days</option><option>In 7 days</option></select></div>
-          <div class="field"><label for="msg">Message</label><input id="msg" value="Activity ${a.n} is ready for you to look at."></div></div>
-      </div>
-      <footer><a class="btn" href="#/assessor/${a.n}">Preview as assessor</a><button class="btn primary" data-toast="Not wired up: no email is sent in the prototype.">Send link</button></footer>
-    </div>`;
-  }
-
-  // ---------- Events ----------
-  let toastTimer;
-  function toast(msg) {
-    let el = document.querySelector(".toast");
-    if (!el) { el = document.createElement("div"); el.className = "toast"; el.setAttribute("role", "status"); document.body.appendChild(el); }
-    el.textContent = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => el.remove(), 2600);
-  }
-  document.addEventListener("click", e => {
-    const t = e.target.closest("[data-href],[data-toast],[data-ui],[data-pick],[data-yn],[data-jump],[data-open]");
-    if (!t) return;
-    if (t.dataset.jump) { e.preventDefault(); document.getElementById(t.dataset.jump).scrollIntoView({ behavior: "smooth", block: "start" });
-      t.parentElement.querySelectorAll("a").forEach(x => x.classList.toggle("on", x === t)); return; }
-    if (t.dataset.open) { const [r, g] = t.dataset.open.split("|"); ui.active = { role: r, grade: g }; if (location.hash === "#/dashboard") render(); else location.hash = "#/dashboard"; return; }
-    if (t.dataset.href) { e.preventDefault(); location.hash = t.dataset.href; return; }
-    if (t.dataset.toast) { e.preventDefault(); toast(t.dataset.toast); return; }
-    if (t.dataset.pick) { t.parentElement.querySelectorAll("button").forEach(b => b.classList.toggle("on", b === t)); return; }
-    if (t.hasAttribute("data-yn")) { t.parentElement.querySelectorAll("button").forEach(b => b.classList.toggle("y", b === t)); return; }
-    if (t.dataset.ui) {
-      const k = t.dataset.ui; ui[k] = t.dataset.val === "toggle" ? !ui[k] : t.dataset.val; render();
-      if (k === "aStep") window.scrollTo(0, 0);
-      if (k === "mSearchOpen" && ui.mSearchOpen) { const el = document.getElementById("msearch"); if (el) el.focus(); }
-    }
-  });
-  document.addEventListener("keydown", e => {
-    if (e.key === "Enter" && e.target.matches("tr[data-href]")) location.hash = e.target.dataset.href;
-    if (e.key === "Escape" && /[?&](c|modal)=/.test(location.hash)) location.hash = location.hash.split("?")[0];
-  });
-  document.addEventListener("input", e => {
-    const k = e.target.dataset && e.target.dataset.uiInput;
-    if (!k) return;
-    ui[k] = e.target.value; const pos = e.target.selectionStart; render();
-    const el = document.querySelector(`[data-ui-input="${k}"]`); if (el) { el.focus(); el.setSelectionRange(pos, pos); }
-  });
-  window.addEventListener("hashchange", () => { const keep = /[?&](c|modal|role)=/.test(location.hash); const y = window.scrollY; render(); if (keep) window.scrollTo(0, y); else window.scrollTo(0, 0); });
-  render();
+/* MTCS Tracker - local-first functional app. Vanilla JS + IndexedDB. No accounts/backend.
+   Data lives in this browser. Back up regularly. */
+(function(){
+"use strict";
+const APP_VERSION="1.0.0";
+/* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
+   Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
+const WORKER_BASE=""; // e.g. "https://mtcs-forms-fetch.<account>.workers.dev"
+const PACK=window.PACKS["g2-surveyor-2026"], TPL=window.TEMPLATES||[], MP=window.MTCS_PAGES||{};
+const COMPS=[],CRITS=[];
+PACK.units.forEach(u=>u.competences.forEach(c=>{const comp=Object.assign({},c,{unitName:u.name,unitId:u.id});COMPS.push(comp);c.criteria.forEach(k=>CRITS.push(Object.assign({},k,{comp})));}));
+const critById=id=>CRITS.find(c=>c.id===id);
+const compLabel=c=>(c.unitId==="core"?"Core ":"Surveyor ")+c.number;
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const uid=p=>(p||"id")+"-"+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const todayISO=()=>new Date().toISOString().slice(0,10);
+const fmtDate=iso=>{if(!iso)return"-";const d=new Date(iso);return isNaN(d)?esc(iso):d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});};
+const STATUSES=["Signed","Evidenced","Planned","Gap"],CODES=["O","P","W","Q","N/C","N/A"];
+const stClass=s=>({Signed:"signed",Evidenced:"mapped",Planned:"planned",Gap:"gap"}[s]||"planned");
+const pill=s=>`<span class="pill ${stClass(s)}">${s}</span>`;
+const DISCLAIMER=`<footer class="disclaimer">Local-first app: your data stays in this browser on this device. Back up regularly. Not affiliated with or endorsed by MTCS or IMarEST. Official forms are (c) MTCS Ltd.</footer>`;
+const ROLES=[
+ {key:"surveyor",name:"Surveyor",ico:"🧭",blurb:"Online and offshore survey operations",grades:["G2","G1","Senior"]},
+ {key:"engineer",name:"Survey Engineer",ico:"🔧",blurb:"Survey equipment, mobilisation and fault finding",grades:["G2","G1","Senior"]},
+ {key:"processor",name:"Data Processor",ico:"🗺️",blurb:"Processing, QC and charting of survey data",grades:["G2","G1","Senior"]},
+ {key:"partychief",name:"Party Chief",ico:"🧑‍✈️",blurb:"Leading the survey team offshore",grades:["Single level"]},
+ {key:"clientrep",name:"Client Representative",ico:"🤝",blurb:"Representing the client on site",grades:["Single level"]}];
+const isG2Surveyor=(r,g)=>r==="surveyor"&&g==="G2";
+let db;
+function idbOpen(){return new Promise((res,rej)=>{const r=indexedDB.open("mtcs-tracker",1);r.onupgradeneeded=()=>{r.result.createObjectStore("kv");r.result.createObjectStore("blobs");};r.onsuccess=()=>{db=r.result;res();};r.onerror=()=>rej(r.error);});}
+function idb(store,mode,fn){return new Promise((res,rej)=>{const tx=db.transaction(store,mode);const req=fn(tx.objectStore(store));tx.oncomplete=()=>res(req&&req.result);tx.onerror=()=>rej(tx.error);if(req)req.onerror=()=>rej(req.error);});}
+const kvGet=k=>idb("kv","readonly",s=>s.get(k)), kvSet=(k,v)=>idb("kv","readwrite",s=>s.put(v,k));
+const blobGet=id=>idb("blobs","readonly",s=>s.get(id)), blobSet=(id,b)=>idb("blobs","readwrite",s=>s.put(b,id)), blobDel=id=>idb("blobs","readwrite",s=>s.delete(id)), blobKeys=()=>idb("blobs","readonly",s=>s.getAllKeys());
+async function sha256(blob){const buf=await blob.arrayBuffer();const h=await crypto.subtle.digest("SHA-256",buf);return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join("");}
+function downloadBlob(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);}
+let S={portfolios:[],templates:[],packImports:[],shared:[],settings:{activeId:null,lastBackupAt:null}};
+function save(){if(!db)return;kvSet("portfolios",S.portfolios).catch(()=>{});kvSet("templates",S.templates).catch(()=>{});kvSet("packImports",S.packImports).catch(()=>{});kvSet("shared",S.shared).catch(()=>{});kvSet("settings",S.settings).catch(()=>{});}
+const active=()=>S.portfolios.find(p=>p.id===S.settings.activeId)||null;
+const ui={role:"surveyor",grade:"G2",mState:"Gap",mSearch:"",drawerCrit:null,preview:null,modal:null,pendingBackup:null,pendingReturn:null,fillTpl:null,toast:""};
+let deferredInstall=null;
+window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstall=e;render();});
+if("serviceWorker" in navigator&&/^https?:$/.test(location.protocol)){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(err=>console.warn("SW failed",err)));}
+function newActivity(n){return{id:String(n),n,title:"Activity "+n,dates:"",summary:"",where:"",witness:"",assessorName:"",planText:"",feedbackText:"",candidateComments:"",status:"Gathering evidence",planAgreed:"",signedOn:"",exportSeq:0,version:1,versions:[],ukq:[{q:"",a:"",ok:""}]};}
+function newPortfolio(name,roleKey,grade,vessel,trip){const role=ROLES.find(r=>r.key===roleKey);return{id:uid("pf"),name,roleKey,role:role.name,grade,packId:"g2-surveyor-2026",routeLabel:grade+" "+role.name+" + G2 Core",vessel:vessel||"",trip:trip||"",assessor:{name:"",email:""},witness:{name:"",email:""},createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),activities:[newActivity(1),newActivity(2),newActivity(3)],criteria:{},evidence:[]};}
+const actOf=(p,id)=>p.activities.find(a=>a.id===String(id));
+const cov=(p,crit,act)=>(p.criteria[crit]||{})[String(act)]||{status:"Gap",code:""};
+function critOverall(p,id){let best="Gap";const rank={Gap:0,Planned:1,Evidenced:2,Signed:3};p.activities.forEach(a=>{const c=cov(p,id,a.id);if(rank[c.status]>rank[best])best=c.status;});return best;}
+function totals(p){const t={Signed:0,Evidenced:0,Planned:0,Gap:0,direct:0,coded:0};CRITS.forEach(k=>t[critOverall(p,k.id)]++);Object.values(p.criteria).forEach(by=>Object.values(by).forEach(c=>{if(c.code){t.coded++;if(c.code==="O"||c.code==="P")t.direct++;}}));t.directPct=t.coded?Math.round(100*t.direct/t.coded):0;return t;}
+const evLinkedCrit=(p,critId)=>p.evidence.filter(e=>e.criteria.includes(critId));
+function packStatus(k){return S.packImports.filter(i=>i.packKey===k).sort((a,b)=>b.importedAt.localeCompare(a.importedAt))[0]||null;}
+function packBannerHTML(){const s=packStatus("g2-surveyor"),c=packStatus("g2-core");if(s&&c)return `<div class="pack-banner"><span class="pb-ico">🧰</span><div class="grow"><b>Forms packs imported</b><div class="small muted">Surveyor: ${s.fileCount} files, ${fmtDate(s.importedAt)} · Core: ${c.fileCount} files, ${fmtDate(c.importedAt)}. Blank templates stored in this browser.</div></div><a class="btn sm" href="#/forms">Forms</a></div>`;return `<div class="pack-banner"><span class="pb-ico">🧰</span><div class="grow"><b>Forms pack: ${(s||c)?"partly imported":"not imported yet"}</b><div class="small muted">Download the current packs from MTCS when you start a portfolio, then import them here. The app uses those blank templates throughout.</div></div><a class="btn sm primary" href="#/forms">Get the forms pack</a></div>`;}
+function toast(m){ui.toast=m;render();setTimeout(()=>{ui.toast="";const t=document.querySelector(".toast");if(t)t.remove();},3600);}
+function parse(){const h=location.hash.replace(/^#/,"")||"/";const[path,q]=h.split("?");return{parts:path.split("/").filter(Boolean),params:new URLSearchParams(q||"")};}
+const here=()=>location.hash.split("?")[0]||"#/";
+function shell(title,body,nav){const p=active(),t=p?totals(p):null,lastB=S.settings.lastBackupAt;
+return `<header class="topbar"><div class="brand"><span class="logo">🧭</span><span>MTCS Tracker</span></div>${p?`<span class="pack-chip">${esc(p.routeLabel)} · ${esc(p.name)}</span>`:""}<span class="spacer"></span><button class="backup-chip" data-action="goto" data-href="#/backup"><span class="bdot" style="${lastB?"":"background:#ff6b5e"}"></span><span class="bl">${lastB?"Backed up "+fmtDate(lastB):"No backup yet"}</span></button><button class="route-chip" data-action="install" data-testid="install-btn">⬇ Install app</button><button class="route-chip exit" data-action="goto" data-href="#/">Portfolios</button></header>
+<div class="shell"><nav class="sidenav"><div class="group">Portfolio</div>
+<a href="#/dashboard" class="${nav==="dashboard"?"active":""}"><span class="ico">🏠</span><span class="lbl">Dashboard</span></a>
+<a href="#/activities" class="${nav==="activities"?"active":""}"><span class="ico">🧭</span><span class="lbl">Activities</span>${p?`<span class="count">${p.activities.length}</span>`:""}</a>
+<a href="#/matrix" class="${nav==="matrix"?"active":""}"><span class="ico">▦</span><span class="lbl">Coverage / Gaps</span>${t?`<span class="count alert">${t.Gap}</span>`:""}</a>
+<a href="#/evidence" class="${nav==="evidence"?"active":""}"><span class="ico">🗂️</span><span class="lbl">Evidence</span>${p?`<span class="count">${p.evidence.length}</span>`:""}</a>
+<div class="group">Assess</div><a href="#/forms" class="${nav==="forms"?"active":""}"><span class="ico">📄</span><span class="lbl">Forms &amp; packs</span></a>
+<a href="#/export" class="${nav==="export"?"active":""}"><span class="ico">⤓</span><span class="lbl">Export / submission</span></a>
+<div class="group">Data</div><a href="#/backup" class="${nav==="backup"?"active":""}"><span class="ico">☁️</span><span class="lbl">Backup &amp; restore</span></a>
+<a href="#/settings" class="${nav==="settings"?"active":""}"><span class="ico">⚙️</span><span class="lbl">Settings</span></a>
+${p?`<div class="trip-box"><b>${esc(p.name)}</b><br>${esc(p.vessel||"No vessel set")}<br><span class="muted">${esc(p.trip||"")}</span></div>`:""}</nav>
+<main><h1 class="sr-only">${esc(title)}</h1>${body}${DISCLAIMER}</main></div>
+<nav class="bottomnav"><a href="#/dashboard" class="${nav==="dashboard"?"active":""}"><span class="ico">🏠</span>Home</a><a href="#/activities" class="${nav==="activities"?"active":""}"><span class="ico">🧭</span>Activities</a><a href="#/matrix" class="${nav==="matrix"?"active":""}"><span class="ico">▦${t&&t.Gap?`<span class="badge">${t.Gap}</span>`:""}</span>Gaps</a><a href="#/evidence" class="${nav==="evidence"?"active":""}"><span class="ico">🗂️</span>Evidence</a><a href="#/more" class="${nav==="more"?"active":""}"><span class="ico">•••</span>More</a></nav>${ui.toast?`<div class="toast">${esc(ui.toast)}</div>`:""}${modalHTML()}${drawerHTML()}`;}
+function viewLanding(){const g2=isG2Surveyor(ui.role,ui.grade);
+const sharedRows=S.shared.map(x=>`<a class="shared-row" href="#/shared/${x.id}"><span class="num">${esc(x.activity.n||"•")}</span><span class="grow"><b>Activity ${esc(x.activity.n)} · ${esc(x.activity.title)}</b><span class="small muted">From ${esc(x.candidateName||"candidate")} · imported ${fmtDate(x.importedAt)} · package v${esc(x.manifest.exportSeq||1)}</span></span><span class="pill planned">Imported copy</span><span class="chev">›</span></a>`).join("");
+return `<header class="topbar"><div class="brand"><span class="logo">🧭</span><span>MTCS Tracker</span></div><span class="spacer"></span><button class="route-chip" data-action="install" data-testid="install-btn">⬇ Install app</button></header>
+<div class="landing-main"><div class="landing"><section class="landing-hero"><span class="pill info">Local-first · no account needed</span><h1>Your MTCS portfolio, on your device</h1><p>Create a portfolio, track criteria across activities, add real evidence files, and share an activity with your assessor as a zip. Everything stays in this browser — back up regularly.</p></section>
+<h2 class="landing-h2">My portfolios</h2>
+${S.portfolios.length?S.portfolios.map(p=>{const t=totals(p);return `<div class="card port-row" style="margin-bottom:10px"><span class="role-ico">🧭</span><span class="grow"><b>${esc(p.name)}</b><div class="small muted">${esc(p.routeLabel)} · ${t.Signed+t.Evidenced}/${CRITS.length} criteria evidenced or signed · ${p.evidence.length} evidence files</div></span><button class="btn primary" data-action="open-portfolio" data-id="${p.id}" data-testid="open-portfolio">Open</button><button class="btn sm" data-action="delete-portfolio" data-id="${p.id}">Delete</button></div>`;}).join(""):`<div class="card" data-testid="empty-state"><b>No portfolios yet</b><p class="small muted">Choose your route below and create your first portfolio. It will be saved in this browser.</p></div>`}
+<h2 class="landing-h2" id="switch">Start a new portfolio</h2><div class="role-list">${ROLES.map(r=>`<div class="role-card ${r.key===ui.role?"open":""}"><button class="role-head" data-action="pick-role" data-role="${r.key}"><span class="role-ico">${r.ico}</span><span class="grow"><b>${esc(r.name)}</b><span class="small muted">${esc(r.blurb)}</span></span><span class="chev">${r.key===ui.role?"▾":"›"}</span></button>
+${r.key===ui.role?`<div class="role-body"><div class="grade-seg ${r.grades.length===1?"single":""}">${r.grades.map(g=>`<button data-action="pick-grade" data-grade="${g}" class="${g===ui.grade?"on":""}">${g}${isG2Surveyor(r.key,g)?"":`<span class="soon">Coming soon</span>`}</button>`).join("")}</div>
+<div class="route-summary"><div class="rs-title">${esc(ui.grade)} ${esc(r.name)} <span class="plus">+</span> G2 Core</div><p class="small muted">G2 Core (C1–C3) included, done once for all G2 roles.</p>
+${g2?`<form data-form="create-portfolio"><div class="field"><label for="pf-name">Your name *</label><input id="pf-name" name="name" required placeholder="Your full name" data-testid="pf-name"></div><div class="field"><label>Vessel / installation (optional)</label><input name="vessel" placeholder="e.g. Vessel name"></div><div class="field"><label>Trip / project (optional)</label><input name="trip" placeholder="e.g. P5459, 3-14 Oct"></div><button class="btn primary lg block" type="submit" data-testid="create-portfolio">Create G2 Surveyor portfolio</button></form>`:`<div class="warn-box"><b>Criteria pack not loaded yet</b><p class="small">Only G2 Surveyor + G2 Core has criteria loaded, so you can't create a portfolio for this route yet — no fake data is created. Pick G2 Surveyor to start for real.</p></div>`}</div></div>`:""}</div>`).join("")}</div>
+<div class="card import-card"><div class="port-row"><span class="imp-ico">⤒</span><span class="grow"><b>Lost your data? Import a backup</b><div class="small muted">Restores a full backup zip into this browser. Importing replaces what's currently stored here.</div></span></div><div class="btn-row"><label class="btn primary">Import backup (.zip)<input type="file" accept=".zip" hidden data-upload="backup"></label></div></div>
+<div class="card shared-card" id="shared"><h2>Shared with me</h2><p class="small muted">An assessor can import an activity zip here — no account needed. It opens as a separate imported copy, never inside your own portfolio.</p><div class="btn-row"><label class="btn primary">Import activity zip (.zip)<input type="file" accept=".zip" hidden data-upload="shared"></label></div><div class="shared-list">${sharedRows||`<p class="small muted">Nothing shared yet.</p>`}</div></div>
+${DISCLAIMER}</div></div>${ui.toast?`<div class="toast">${esc(ui.toast)}</div>`:""}${modalHTML()}`;}
+function whatsNext(p){const items=[],t=totals(p);const firstGap=CRITS.find(k=>critOverall(p,k.id)==="Gap");if(firstGap)items.push({dot:"var(--gap)",text:`${t.Gap} criteria still Gap — start with ${firstGap.id}`,href:"#/matrix"});
+const plannedNoEv=CRITS.find(k=>p.activities.some(a=>cov(p,k.id,a.id).status==="Planned")&&!evLinkedCrit(p,k.id).length);if(plannedNoEv)items.push({dot:"var(--planned-dot)",text:`Planned with no evidence yet: ${plannedNoEv.id}`,href:"#/matrix?c="+plannedNoEv.id});
+const unmapped=p.evidence.filter(e=>!e.criteria.length);if(unmapped.length)items.push({dot:"var(--mapped-dot)",text:`${unmapped.length} evidence item(s) not linked to any criterion`,href:"#/evidence"});
+p.activities.forEach(a=>{if(!a.summary)items.push({dot:"var(--brand)",text:`Activity ${a.n} needs a work-activity summary`,href:"#/activity/"+a.id});});
+if(!packStatus("g2-surveyor")||!packStatus("g2-core"))items.push({dot:"var(--brand)",text:"Forms pack not fully imported yet",href:"#/forms"});
+const lb=S.settings.lastBackupAt;if(!lb||Date.now()-new Date(lb).getTime()>7*864e5)items.push({dot:"var(--gap)",text:lb?"Last backup is over 7 days old":"No backup yet — export one before you rely on this device",href:"#/backup"});
+if(!items.length)items.push({dot:"var(--signed)",text:"All caught up — keep adding evidence",href:"#/evidence"});return items.slice(0,6);}
+function viewDashboard(){const p=active();if(!p){location.hash="#/";return"";}const t=totals(p);
+return shell("Dashboard",`<div class="dash-head"><a class="ctx-chip" href="#/settings"><b>${esc(p.name)}</b><span>${esc(p.routeLabel)}${p.vessel?" · "+esc(p.vessel):""}</span></a><div class="actions"><a class="btn" href="#/backup">Back up now</a></div></div>
+<section class="card next-card"><div class="card-head"><h2>What's next</h2></div><div class="next-list" data-testid="whats-next">${whatsNext(p).map(i=>`<a class="next-row" href="${i.href}"><span class="dot" style="background:${i.dot}"></span><span class="grow">${esc(i.text)}</span><span class="chev">›</span></a>`).join("")}</div></section>
+${packBannerHTML()}
+<section class="card"><div class="card-head"><h2>Readiness</h2><span class="right small muted">${CRITS.length} criteria</span></div><div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"><div class="ring" style="--v:${t.Signed};--w:${t.Signed+t.Evidenced};--x:${t.Signed+t.Evidenced+t.Planned}" data-label="${t.Signed} signed\n${t.Gap} gaps"></div><div class="grow"><div class="stat-line"><span class="sw signed"></span>Signed <b>${t.Signed}</b></div><div class="stat-line"><span class="sw mapped"></span>Evidenced <b>${t.Evidenced}</b></div><div class="stat-line"><span class="sw planned"></span>Planned <b>${t.Planned}</b></div><div class="stat-line"><span class="sw gap"></span>Gap <b>${t.Gap}</b></div><p class="small muted" style="margin-top:10px">Direct evidence (O/P): <b>${t.directPct}%</b> of coded criteria (70% minimum guide).</p><div class="meter" style="--d:${t.directPct}%"><span class="mark"></span></div></div></div></section>
+<h2 class="sec-h">Activities</h2><div class="stack">${p.activities.map(a=>`<a class="act-card" href="#/activity/${a.id}"><span class="num">${a.n}</span><span class="grow"><b>${esc(a.title)}</b><span class="small muted" style="display:block">${esc(a.dates||"No dates yet")} · ${esc(a.status)}</span></span><span class="chev">›</span></a>`).join("")}</div>`,"dashboard");}
+function viewActivities(){const p=active();if(!p){location.hash="#/";return"";}
+return shell("Activities",`<div class="page-head"><div><div class="crumb">Portfolio</div><h1>Activities</h1><p class="muted">Rename and edit each assessed activity.</p></div><div class="actions"><button class="btn" data-action="add-activity" data-testid="add-activity">+ Add activity</button></div></div><div class="stack">${p.activities.map(a=>{const cnt=CRITS.filter(k=>cov(p,k.id,a.id).status!=="Gap").length;return `<a class="act-card" href="#/activity/${a.id}"><span class="num">${a.n}</span><span class="grow"><b>${esc(a.title)}</b><span class="small muted" style="display:block">${esc(a.dates||"No dates")} · ${cnt} criteria in plan · ${esc(a.status)}</span></span><span class="chev">›</span></a>`;}).join("")}</div>`,"activities");}
+function evRow(p,e){return `<li class="${e.criteria.length?"":"unmapped"}" style="align-items:center"><span class="ev-ico">${e.mime&&e.mime.startsWith("image/")?"📷":"📄"}</span><div class="grow"><b class="small">${esc(e.title)}</b>${e.redact?` <span class="pill warn">Check for client data</span>`:""}<div class="fname">${esc(e.fileName)} · ${(e.size/1024).toFixed(1)} KB</div><div>${e.criteria.map(c=>`<button class="ev-chip" data-action="open-crit" data-crit="${c}">${c}</button>`).join("")||`<span class="pill gap" style="margin-top:6px">Unmapped</span>`}</div></div><div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end"><button class="btn sm" data-action="preview-ev" data-id="${e.id}" data-testid="preview-ev">Preview</button><button class="btn sm" data-action="download-ev" data-id="${e.id}">Download</button><button class="btn sm ghost" data-action="delete-ev" data-id="${e.id}">Delete</button></div></li>`;}
+function viewActivity(id,params){const p=active();if(!p){location.hash="#/";return"";}const a=actOf(p,id)||p.activities[0];if(!a)return shell("Activity",`<div class="card">No activities yet.</div>`,"activities");
+if(params&&params.get("c"))ui.drawerCrit=params.get("c");
+const ev=p.evidence.filter(e=>String(e.activityId)===String(a.id)), planned=CRITS.filter(k=>cov(p,k.id,a.id).status!=="Gap");
+const groups=COMPS.map(c=>{const ks=c.criteria.filter(k=>cov(p,k.id,a.id).status!=="Gap");if(!ks.length)return"";return `<div class="crit-group"><div class="cg-head">${compLabel(c)} <span class="muted small">${esc(c.title)}</span></div>${ks.map(k=>{const cv=cov(p,k.id,a.id);return `<a class="crit-line" href="#/activity/${a.id}?c=${k.id}"><span class="mcell ${stClass(cv.status)}">${esc(cv.code||"—")}</span><span class="crit-id">${k.id}</span><span class="cl-text">${esc(k.text)}</span>${pill(cv.status)}</a>`;}).join("")}</div>`;}).join("");
+return shell("Activity "+a.n,`<div class="act-switch">${p.activities.map(x=>`<a href="#/activity/${x.id}" class="${x.id===a.id?"on":""}"><b>${x.n}</b> Activity ${x.n}</a>`).join("")}</div>
+<section class="card act-status"><div class="as-top"><span class="num">${a.n}</span><div class="grow"><div class="field"><label>Activity title</label><input value="${esc(a.title)}" data-abind="title" data-act="${a.id}" data-testid="act-title"></div><div class="field"><label>Dates</label><input value="${esc(a.dates)}" data-abind="dates" data-act="${a.id}" placeholder="e.g. 8-11 Oct 2026"></div><span class="pill planned">${esc(a.status)}</span></div></div><div class="next-step"><b>Next step</b><span>${a.status==="Signed"?"Signed and locked.":ev.length?"Link evidence to criteria, then export for your assessor.":"Add evidence and mark the criteria you covered."}</span></div><div class="btn-row"><a class="btn" href="#/assessor/${a.id}">Preview assessor view</a><button class="btn" data-action="snapshot" data-act="${a.id}">Save version snapshot</button></div></section>
+<div class="act-grid"><section class="card ag-evidence"><div class="card-head"><h2>Evidence</h2><span class="right small muted">${ev.length} items</span></div><div class="btn-row"><label class="btn primary">📄 Upload evidence file<input type="file" multiple hidden data-upload="evidence" data-act="${a.id}" data-testid="ev-upload"></label></div><p class="tiny muted">Real files stored in this browser. Preview works for PDF / image / text.</p><ul class="list">${ev.map(e=>evRow(p,e)).join("")||`<li class="muted small">No evidence for this activity yet.</li>`}</ul></section>
+<section class="card ag-criteria"><div class="card-head"><h2>Criteria in this activity</h2><span class="right small muted">${planned.length}</span></div><p class="tiny muted">Tap a criterion to set status (Signed/Evidenced/Planned/Gap), code (O/P/W/Q/N-C/N-A) and linked evidence. Use Coverage/Gaps to add more.</p>${groups||`<p class="small muted">Nothing planned yet — open <a href="#/matrix">Coverage / Gaps</a> and tap a criterion.</p>`}</section>
+<details class="card ag-plan" open><summary><h2>Assessment plan &amp; feedback</h2></summary><form data-form="activity-edit" data-act="${a.id}">
+<div class="field"><label>Work activity summary</label><textarea name="summary" data-testid="act-summary">${esc(a.summary)}</textarea></div><div class="field"><label>Where</label><input name="where" value="${esc(a.where)}"></div><div class="field"><label>Witness</label><input name="witness" value="${esc(a.witness)}"></div><div class="field"><label>Assessor name</label><input name="assessorName" value="${esc(a.assessorName||p.assessor.name)}"></div><div class="field"><label>Plan notes</label><textarea name="planText">${esc(a.planText)}</textarea></div><div class="field"><label>Assessor feedback</label><textarea name="feedbackText">${esc(a.feedbackText)}</textarea></div><div class="field"><label>Candidate comments</label><textarea name="candidateComments">${esc(a.candidateComments)}</textarea></div><h3>Knowledge questions (UKQ notes)</h3>
+${a.ukq.map((u,i)=>`<div class="field"><label>Question ${i+1}</label><input name="ukq-q-${i}" value="${esc(u.q)}" placeholder="Question"><input name="ukq-a-${i}" value="${esc(u.a)}" placeholder="Your answer / notes"><input name="ukq-ok-${i}" value="${esc(u.ok)}" placeholder="Satisfactory? Y/N"></div>`).join("")}
+<button class="btn sm" type="button" data-action="add-ukq" data-act="${a.id}">+ Add question</button><div class="btn-row"><button class="btn primary" type="submit" data-testid="save-activity">Save activity</button></div></form></details>
+<section class="card ag-share"><div class="card-head"><h2>Share this activity (zip)</h2><span class="right pill planned">No accounts</span></div>
+<div class="share-block"><b>Export activity for assessor (.zip)</b><p class="small muted">One zip: plan, criteria states, evidence files and manifest.json with SHA-256 hashes. Send by email, message or USB.</p><div class="btn-row"><button class="btn primary" data-action="export-activity" data-act="${a.id}" data-testid="export-activity">⤓ Export activity for assessor (.zip)</button></div><p class="tiny muted">Exports so far: ${a.exportSeq} · current version v${a.version}</p></div>
+<div class="share-block"><b>Import assessor return (.zip)</b><p class="small muted">You review changes first. Import never silently overwrites: applying adds a new version, with rollback.</p><div class="btn-row"><label class="btn">⤒ Import assessor return (.zip)<input type="file" accept=".zip" hidden data-upload="return" data-act="${a.id}"></label></div></div>
+<div class="share-block"><b>Version history</b><ul class="list small"><li><span class="pill signed">v${a.version}</span><div class="grow">Current</div></li>${(a.versions||[]).slice().reverse().map(v=>`<li><span class="pill planned">v${v.version}</span><div class="grow">${esc(v.label)} · ${fmtDate(v.at)}</div><button class="btn sm" data-action="rollback" data-act="${a.id}" data-ver="${v.version}">Restore</button></li>`).join("")||`<li class="muted small">No earlier versions yet.</li>`}</ul></div></section></div>`,"activities");}
+function viewMatrix(params){const p=active();if(!p){location.hash="#/";return"";}if(params&&params.get("c"))ui.drawerCrit=params.get("c");if(params&&params.get("f"))ui.mState={gap:"Gap",signed:"Signed",evidenced:"Evidenced",planned:"Planned",all:"all"}[params.get("f")]||ui.mState;
+const q=ui.mSearch.toLowerCase();
+const cards=COMPS.map(c=>{const ks=c.criteria.filter(k=>(ui.mState==="all"||critOverall(p,k.id)===ui.mState)&&(!q||k.id.toLowerCase().includes(q)||k.text.toLowerCase().includes(q)));if(!ks.length)return"";const done=c.criteria.filter(k=>["Signed","Evidenced"].includes(critOverall(p,k.id))).length;
+return `<details class="comp-card"><summary><span class="cc-title"><b>${compLabel(c)}</b> · ${done}/${c.criteria.length} evidenced · in ${p.activities.filter(a=>c.criteria.some(k=>cov(p,k.id,a.id).status!=="Gap")).length}/${p.activities.length} activities</span><span class="small muted">${esc(c.title)}</span></summary>${ks.map(k=>`<a class="cc-row" href="#/matrix?c=${k.id}"><span class="crit-id">${k.id}</span><span>${esc(k.text)}</span><span class="chips">${p.activities.map(a=>{const cv=cov(p,k.id,a.id);return `<span class="chip ${stClass(cv.status)}"><i>A${a.n}</i> ${esc(cv.code||"–")}${cv.status==="Signed"?" ✓":""}</span>`;}).join("")} ${pill(critOverall(p,k.id))}</span></a>`).join("")}</details>`;}).join("");
+return shell("Coverage",`<div class="page-head"><div><div class="crumb">Coverage matrix</div><h1>Coverage &amp; gaps</h1><p class="muted">Tap a criterion for full wording, status per activity and evidence links.</p></div></div><div class="filters"><div class="seg">${["Gap","Planned","Evidenced","Signed","all"].map(s=>`<button data-action="mfilter" data-f="${s}" class="${ui.mState===s?"on":""}">${s==="all"?"All":s}</button>`).join("")}</div><input type="search" placeholder="Search criteria…" value="${esc(ui.mSearch)}" data-search="matrix" data-testid="matrix-search"></div>${cards||`<div class="card">No criteria match this filter.</div>`}`,"matrix");}
+function viewEvidence(){const p=active();if(!p){location.hash="#/";return"";}
+return shell("Evidence",`<div class="page-head"><div><div class="crumb">Evidence library</div><h1>Evidence</h1><p class="muted">Real files stored in this browser and included in backups. Flag anything that may contain client data.</p></div><div class="actions"><label class="btn primary">Upload evidence<input type="file" multiple hidden data-upload="evidence" data-testid="ev-upload-lib"></label></div></div>
+<section class="card"><ul class="list">${p.evidence.map(e=>evRow(p,e)).join("")||`<li class="muted">No evidence yet. Upload a PDF, photo or document.</li>`}</ul></section>
+${p.evidence.length?`<section class="card"><h2>Edit evidence details</h2>${p.evidence.map(e=>`<form data-form="evidence-edit" data-id="${e.id}" style="border-bottom:1px solid #eef1f5;padding:10px 0"><div class="field"><label>Title</label><input name="title" value="${esc(e.title)}"></div><div class="field"><label>Date (YYYY-MM-DD)</label><input name="date" value="${esc(e.date)}"></div><div class="field"><label>Tags (comma separated)</label><input name="tags" value="${esc((e.tags||[]).join(", "))}"></div><div class="field"><label>Activity</label><select name="activityId">${p.activities.map(a=>`<option value="${a.id}" ${String(e.activityId)===String(a.id)?"selected":""}>Activity ${a.n}</option>`).join("")}<option value="" ${!e.activityId?"selected":""}>None</option></select></div><div class="field"><label>Criteria codes (comma separated, e.g. S01a, C1a)</label><input name="criteria" value="${esc(e.criteria.join(", "))}"></div><label class="checkline"><input type="checkbox" name="redact" ${e.redact?"checked":""}> Flag: may contain client / sensitive data</label><button class="btn sm primary" type="submit">Save</button></form>`).join("")}</section>`:""}`,"evidence");}
+function viewForms(){const packCard=(key,title)=>{const pg=MP[key]||{},imp=packStatus(key);return `<section class="card pack-card"><div class="card-head"><h2>${title}</h2></div><ol class="pack-steps">
+<li><span class="step">1</span><div class="grow"><b>Get the pack</b><div class="small muted">One-click via our free fetch worker if deployed; otherwise this opens the official MTCS zip download, then step 2 imports it. Browsers cannot fetch it directly from MTCS (no CORS header), so without the worker it is two taps.</div></div><button class="btn primary" data-action="get-pack" data-pack="${key}" data-testid="get-pack-${key}">Get latest forms pack</button></li>
+<li><span class="step">2</span><div class="grow"><b>Import downloaded pack (.zip)</b><div class="small muted">Unzips in your browser, stores each blank PDF and records SHA-256 hashes. Originals are never edited — Fill copy makes a filled copy.</div></div><label class="btn">Import pack (.zip)<input type="file" accept=".zip" hidden data-upload="pack" data-pack="${key}" data-testid="import-pack-${key}"></label></li></ol>
+<div class="pack-status ${imp?"":"not-imported"}" style="${imp?"background:#f5fbf7;border:1px solid #cfe9d8":""}">${imp?`<b>✓ Pack imported</b><span class="small">${esc(imp.zipName)} · ${imp.fileCount} files · imported ${fmtDate(imp.importedAt)}</span>`:`<b>Not imported yet</b><span class="small">No templates stored for this unit in this browser.</span>`}</div>
+<p class="tiny muted">Source: <a href="${esc(pg.url||"#")}" target="_blank" rel="noopener">${esc(pg.title||"MTCS Online")} ↗</a> · <a href="${esc(pg.zip||"#")}" target="_blank" rel="noopener">Download pack from MTCS ↗</a></p></section>`;};
+const stored=S.templates.map(t=>`<li><span class="ev-ico">📄</span><div class="grow"><b class="small">${esc(t.fileName)}</b><div class="fname">${esc(t.packKey)} · ${(t.size/1024).toFixed(0)} KB · SHA-256 ${esc(t.sha256.slice(0,12))}…</div></div><div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn sm" data-action="open-template" data-id="${t.id}">Open blank</button><button class="btn sm primary" data-action="fill-template" data-id="${t.id}">Fill copy</button></div></li>`).join("");
+return shell("Forms",`<div class="page-head"><div><div class="crumb">Forms &amp; templates</div><h1>Forms packs</h1><p class="muted">Download a pack once at the start of a portfolio; the app uses those blank templates throughout. Worker: ${WORKER_BASE?"configured":"<b>not deployed yet</b> — one-click fetch needs the free Cloudflare Worker deployed (worker/ in source repo); download + import works now."}</p></div></div>
+<div class="grid g-2 pack-grid">${packCard("g2-surveyor","G2 Surveyor — All Files")}${packCard("g2-core","G2 Core — All Files")}</div>
+<section class="card"><div class="card-head"><h2>Stored blank templates</h2><span class="right small muted">${S.templates.length} files</span></div><ul class="list">${stored||`<li class="muted small">None stored yet. Import a pack above.</li>`}</ul></section>
+<section class="card"><h2>Individual forms (from MTCS)</h2><p class="tiny muted">One-off downloads. Official forms are (c) MTCS Ltd.</p><ul class="list">${TPL.map(t=>`<li><span class="ev-ico">📄</span><div class="grow"><b class="small">${esc(t.label)} — ${esc(t.pack)}</b><div class="fname">${esc(t.file)}</div></div>${t.mtcsUrl?`<a class="btn sm" href="${esc(t.mtcsUrl)}" target="_blank" rel="noopener">Download from MTCS ↗</a>`:""}</li>`).join("")}</ul></section>`,"forms");}
+function viewBackup(){const lb=S.settings.lastBackupAt;return shell("Backup",`<div class="page-head"><div><div class="crumb">Backup &amp; restore</div><h1>Backup &amp; restore</h1><p class="muted">Your data only lives in this browser. Export a backup zip regularly.</p></div></div>
+<section class="card status-card ${lb?"":"stale"}"><div class="st-row"><span class="st-dot ${lb?"ok":"bad"}"></span><div class="grow"><b>${lb?"Last backup "+fmtDate(lb):"No backup yet"}</b><div class="small muted">${S.portfolios.length} portfolio(s), ${S.portfolios.reduce((n,p)=>n+p.evidence.length,0)} evidence files, ${S.templates.length} templates</div></div><button class="btn primary" data-action="export-backup" data-testid="export-backup">Back up now (.zip)</button></div></section>
+<section class="card"><h2>Restore</h2><p class="small muted">Importing a full backup replaces what's currently in this browser. You see a summary before anything changes.</p><label class="btn">Import backup (.zip)<input type="file" accept=".zip" hidden data-upload="backup"></label></section>
+<section class="card"><h2>Install this app</h2><p class="small muted">Add MTCS Tracker to your home screen so it behaves like an installed app and works offline.</p><button class="btn primary" data-action="install">⬇ Install app</button></section>`,"backup");}
+function viewSettings(){const p=active();return shell("Settings",`<div class="page-head"><div><h1>Settings</h1></div></div>
+${p?`<section class="card"><h2>Portfolio details</h2><form data-form="portfolio-edit"><div class="field"><label>Your name</label><input name="name" value="${esc(p.name)}"></div><div class="field"><label>Vessel / installation</label><input name="vessel" value="${esc(p.vessel)}"></div><div class="field"><label>Trip / project</label><input name="trip" value="${esc(p.trip)}"></div><div class="field"><label>Assessor name</label><input name="assessorName" value="${esc(p.assessor.name)}"></div><div class="field"><label>Assessor email</label><input name="assessorEmail" value="${esc(p.assessor.email)}"></div><div class="field"><label>Witness name</label><input name="witnessName" value="${esc(p.witness.name)}"></div><div class="field"><label>Witness email</label><input name="witnessEmail" value="${esc(p.witness.email)}"></div><button class="btn primary" type="submit">Save</button></form></section>`:`<section class="card">No portfolio open. <a href="#/">Choose or create one</a>.</section>`}
+<section class="card"><h2>Forms packs</h2>${packBannerHTML()}</section>
+<section class="card"><h2>App</h2><p class="small muted">MTCS Tracker v${APP_VERSION} · local-first, no accounts. MTCS fetch worker: ${WORKER_BASE?esc(WORKER_BASE):"not deployed yet (manual pack import works now)"}.</p><button class="btn" data-action="install">⬇ Install app</button>${p?`<div class="btn-row"><button class="btn" data-action="delete-portfolio" data-id="${p.id}">Delete this portfolio</button></div>`:""}</section>`,"settings");}
+function viewMore(){return shell("More",`<section class="card more-list">${[["#/forms","📄","Forms & packs","MTCS blank templates"],["#/export","⤓","Export / submission","Checklist and backup"],["#/backup","☁️","Backup & restore","Export or import a full backup"],["#/settings","⚙️","Settings","Portfolio, people, install"],["#/","🧭","Portfolios & routes","Open, create or import"]].map(x=>`<a class="more-row" href="${x[0]}"><span class="role-ico sm">${x[1]}</span><span class="grow"><b>${x[2]}</b><span class="small muted">${x[3]}</span></span><span class="chev">›</span></a>`).join("")}</section>`,"more");}
+function viewExport(){const p=active();if(!p){location.hash="#/";return"";}const t=totals(p);return shell("Export",`<div class="page-head"><div><h1>Export / submission</h1><p class="muted">Checklist only — this app never submits to MTCS for you.</p></div><div class="actions"><button class="btn primary" data-action="export-backup">Download full portfolio backup (.zip)</button></div></div><section class="card"><ul class="list"><li><span class="dot" style="background:var(--planned-dot)"></span><div class="grow"><b>Criteria: ${t.Signed} signed, ${t.Evidenced} evidenced, ${t.Gap} gaps</b><div class="small muted">All 79 criteria should be covered across at least three activities.</div></div></li><li><span class="dot" style="background:${packStatus("g2-surveyor")?"var(--signed)":"var(--gap)"}"></span><div class="grow"><b>Forms pack</b><div class="small muted">${packStatus("g2-surveyor")?"Imported "+fmtDate(packStatus("g2-surveyor").importedAt):"Not imported yet"}</div></div></li><li><span class="dot" style="background:var(--planned-dot)"></span><div class="grow"><b>Evidence files: ${p.evidence.length}</b><div class="small muted">${p.evidence.filter(e=>e.redact).length} flagged for client-data check.</div></div></li></ul></section>`,"export");}
+function viewShared(id){const x=S.shared.find(s=>s.id===id);if(!x)return shell("Shared",`<div class="card">That shared activity isn't in this browser. <a href="#/">Import it from the opening screen</a>.</div>`,"more");const a=x.activity;
+return shell("Shared activity",`<div class="link-shell" style="padding:0"><div class="imported-banner"><b>Imported copy — not your portfolio</b><span>From ${esc(x.candidateName)} · exported ${fmtDate(x.manifest.exportedAt)} · package v${esc(x.manifest.exportSeq)} · based on v${esc(x.manifest.baseVersion)}</span></div>
+<section class="card"><h1 style="font-size:1.25rem">Activity ${a.n} · ${esc(a.title)}</h1><p class="small muted">${esc(a.dates||"")} · ${esc(a.summary||"")}</p><form data-form="shared-edit" data-id="${x.id}">
+<div class="field"><label>Assessor feedback</label><textarea name="feedbackText">${esc(a.feedbackText||"")}</textarea></div><div class="field"><label>Assessor name</label><input name="assessorName" value="${esc(a.assessorName||"")}"></div><h3>Criteria (${Object.keys(x.criteria||{}).length} in package)</h3>
+${Object.entries(x.criteria||{}).map(([cid,cv])=>{const k=critById(cid);return `<div class="crit-line"><span class="crit-id">${cid}</span><span class="cl-text">${esc(k?k.text:"")}</span><select data-shared-crit="${cid}" data-shared-id="${x.id}">${STATUSES.map(s=>`<option ${cv.status===s?"selected":""}>${s}</option>`).join("")}</select><select data-shared-code="${cid}" data-shared-id="${x.id}">${["",...CODES].map(s=>`<option value="${s}" ${cv.code===s?"selected":""}>${s||"—"}</option>`).join("")}</select></div>`;}).join("")||`<p class="small muted">No criteria states in this package.</p>`}
+<h3>Evidence in package (${(x.evidence||[]).length})</h3><ul class="list">${(x.evidence||[]).map(e=>`<li><span class="ev-ico">📄</span><div class="grow"><b class="small">${esc(e.title)}</b><div class="fname">${esc(e.fileName)}</div></div><button class="btn sm" type="button" data-action="download-shared-ev" data-shared="${x.id}" data-id="${e.id}">Download</button></li>`).join("")}</ul>
+<div class="field"><label>Signed on (YYYY-MM-DD)</label><input name="signedOn" value="${esc(a.signedOn||"")}"></div><div class="btn-row"><button class="btn" type="submit">Save changes</button><button class="btn primary" type="button" data-action="export-return" data-id="${x.id}" data-testid="export-return">⤓ Export reviewed activity zip (.zip)</button><button class="btn ghost" type="button" data-action="delete-shared" data-id="${x.id}">Delete imported copy</button></div></form></section></div>`,"more");}
+function viewAssessor(actId){const p=active();if(!p){location.hash="#/";return"";}const a=actOf(p,actId)||p.activities[0];const inAct=CRITS.filter(k=>cov(p,k.id,a.id).status!=="Gap");const signed=inAct.filter(k=>cov(p,k.id,a.id).status==="Signed").length;
+return shell("Assessor view",`<div class="link-shell" style="padding:0"><section class="card"><span class="pill info">Preview — assessor view for your own activity</span><h1 style="font-size:1.3rem;margin-top:8px">Activity ${a.n} · ${esc(a.title)}</h1><p class="small muted">Candidate ${esc(p.name)} · ${esc(a.dates||"")} · ${esc(a.summary||"")}</p><h3>Criteria</h3>
+${inAct.map(k=>{const cv=cov(p,k.id,a.id);return `<div class="crit-line"><span class="crit-id">${k.id}</span><span class="cl-text">${esc(k.text)}</span><select data-crit-status="${k.id}" data-act="${a.id}">${STATUSES.map(s=>`<option ${cv.status===s?"selected":""}>${s}</option>`).join("")}</select></div>`;}).join("")||`<p class="small muted">No criteria planned in this activity yet.</p>`}
+<h3>Knowledge questions</h3>${a.ukq.map(u=>`<p class="small"><b>${esc(u.q||"—")}</b><br>${esc(u.a||"")} ${u.ok?`<span class="pill signed">Satisfactory: ${esc(u.ok)}</span>`:""}</p>`).join("")}
+<div class="field"><label>Assessor feedback</label><textarea data-abind="feedbackText" data-act="${a.id}">${esc(a.feedbackText)}</textarea></div>
+<div class="sum-box"><div class="sum-line ${signed===inAct.length&&inAct.length?"ok":"warn"}"><div class="grow"><b>Summary: ${inAct.length} criteria: ${signed} signed, ${inAct.length-signed} not signed</b><div class="small muted">Sign and lock only appears here, after this summary.</div></div></div></div>
+<div class="btn-row"><button class="btn success" data-action="sign-lock" data-act="${a.id}">Sign and lock</button><a class="btn" href="#/activity/${a.id}">Back to activity</a></div></section></div>`,"activities");}
+function modalHTML(){
+if(ui.preview){const e=ui.preview;const inner=e.mime&&e.mime.startsWith("image/")?`<img src="${e.url}" style="max-width:100%;border-radius:8px" alt="">`:e.mime==="application/pdf"?`<iframe src="${e.url}" style="width:100%;height:60vh;border:1px solid var(--line);border-radius:8px" title="PDF preview"></iframe>`:e.text!=null?`<pre style="white-space:pre-wrap;max-height:60vh;overflow:auto">${esc(e.text)}</pre>`:`<p class="small muted">No in-app preview for this file type (${esc(e.mime||"unknown")}). Download the original instead.</p>`;
+return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog"><header><h2>${esc(e.title)}</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><div class="fname">${esc(e.fileName)}</div>${inner}</div><footer><button class="btn" data-action="close-modal">Close</button></footer></div>`;}
+if(ui.modal==="install")return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog"><header><h2>Install MTCS Tracker</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><p><b>Android / Chrome:</b> tap Install below if offered, or browser menu ⋮ → <i>Add to Home screen / Install app</i>.</p><p><b>iPhone / iPad (Safari):</b> Share button → <i>Add to Home Screen</i> → <i>Add</i>.</p><p class="small muted">Installed, it opens standalone and works offline. Data stays in this browser — keep exporting backups.</p></div><footer>${deferredInstall?`<button class="btn primary" data-action="install-prompt">Install app</button>`:""}<button class="btn" data-action="close-modal">Close</button></footer></div>`;
+if(ui.pendingBackup){const m=ui.pendingBackup.manifest,d=ui.pendingBackup.data;return `<div class="scrim"></div><div class="modal merge" role="dialog"><header><h2>Import this backup?</h2></header><div class="body"><p class="small">Exported ${fmtDate(m.exportedAt)} · app v${esc(m.appVersion)} · schema ${esc(m.schema)}</p><ul class="list small"><li><div class="grow"><b>${d.portfolios.length} portfolio(s)</b></div></li><li><div class="grow">${d.portfolios.reduce((n,p)=>n+(p.evidence||[]).length,0)} evidence files · ${(d.templates||[]).length} templates · ${(d.shared||[]).length} shared activities</div></li></ul><div class="warn-box"><b>This replaces</b> the portfolios, evidence and templates currently in this browser.</div></div><footer class="merge-foot"><button class="btn" data-action="cancel-backup-import">Cancel</button><button class="btn primary" data-action="confirm-backup-import" data-testid="confirm-backup">Import and replace</button></footer></div>`;}
+if(ui.pendingReturn){const r=ui.pendingReturn;return `<div class="scrim"></div><div class="modal merge" role="dialog"><header><h2>Review assessor return</h2></header><div class="body"><div class="cmp-row cmp-head"><span>Item</span><span>Expected (yours)</span><span>Received</span></div><div class="cmp-row"><span class="cmp-l">Based on version</span><span class="cmp-e">v${r.activity.version}</span><span class="cmp-r">v${esc(r.manifest.baseVersion)}</span></div><div class="cmp-row"><span class="cmp-l">Criteria signed / evidenced</span><span class="cmp-e">${r.expectedCount}</span><span class="cmp-r">${r.receivedCount}</span></div><div class="cmp-row"><span class="cmp-l">Evidence files</span><span class="cmp-e">${r.activityEvidence}</span><span class="cmp-r">${r.pkgEvidence}</span></div>${r.warnings.length?`<div class="warn-box"><b>Check before applying</b><ul>${r.warnings.map(w=>`<li>${esc(w)}</li>`).join("")}</ul></div>`:`<div class="pack-status" style="background:#f5fbf7;border:1px solid #cfe9d8"><b>✓ No warnings</b><span class="small">Hashes match; return is based on your current version.</span></div>`}<p class="small muted">Applying first saves a snapshot of your current activity for rollback.</p></div><footer class="merge-foot"><button class="btn" data-action="cancel-return">Cancel</button><button class="btn" data-action="return-as-copy">Save as separate copy</button><button class="btn primary" data-action="apply-return" data-testid="apply-return">Import and apply</button></footer></div>`;}
+if(ui.fillTpl){const p=active();return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog"><header><h2>Fill a copy</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><p class="small muted">Creates a filled copy of <b>${esc(ui.fillTpl.fileName)}</b> (candidate name, date, and for Plan/Feedback forms, activity details). The stored blank is never changed.</p>${p?`<div class="field"><label>Activity</label><select id="fill-act">${p.activities.map(a=>`<option value="${a.id}">Activity ${a.n} — ${esc(a.title)}</option>`).join("")}</select></div>`:`<p class="small">Open a portfolio first.</p>`}</div><footer><button class="btn" data-action="close-modal">Cancel</button><button class="btn primary" data-action="do-fill">Download filled copy</button></footer></div>`;}
+return "";}
+function drawerHTML(){const p=active();if(!ui.drawerCrit||!p)return"";const k=critById(ui.drawerCrit);if(!k)return"";
+return `<div class="scrim" data-action="close-drawer"></div><aside class="drawer" role="dialog"><header><div><span class="crit-id">${k.id}</span><div class="small muted">${compLabel(k.comp)} · ${esc(k.comp.title)}</div></div><button class="close" data-action="close-drawer">✕</button></header><div class="body"><div class="quote">${esc(k.text)}</div><p>${pill(critOverall(p,k.id))}</p>
+${p.activities.map(a=>{const cv=cov(p,k.id,a.id);return `<div class="field"><label>Activity ${a.n} — status / code</label><div style="display:flex;gap:6px"><select data-crit-status="${k.id}" data-act="${a.id}" style="flex:1">${STATUSES.map(s=>`<option ${cv.status===s?"selected":""}>${s}</option>`).join("")}</select><select data-crit-code="${k.id}" data-act="${a.id}" style="flex:1">${["",...CODES].map(s=>`<option value="${s}" ${cv.code===s?"selected":""}>${s||"No code"}</option>`).join("")}</select></div></div>`;}).join("")}
+<h3>Linked evidence</h3>${p.evidence.length?p.evidence.map(e=>`<label class="checkline"><input type="checkbox" data-ev-link="${e.id}" data-crit="${k.id}" ${e.criteria.includes(k.id)?"checked":""}> ${esc(e.title)} <span class="muted small">(${esc(e.fileName)})</span></label>`).join(""):`<p class="small muted">No evidence uploaded yet.</p>`}</div><footer><button class="btn" data-action="close-drawer">Done</button></footer></aside>`;}
+function setCov(p,crit,act,patch){p.criteria[crit]=p.criteria[crit]||{};p.criteria[crit][String(act)]=Object.assign(cov(p,crit,act),patch);p.updatedAt=new Date().toISOString();save();}
+async function addEvidenceFiles(p,files,actId){for(const f of files){const blobId=uid("blob");await blobSet(blobId,f);p.evidence.push({id:uid("ev"),blobId,title:f.name.replace(/\.[^.]+$/,""),fileName:f.name,mime:f.type||"application/octet-stream",size:f.size,date:todayISO(),tags:[],criteria:[],activityId:actId||"",redact:false,createdAt:new Date().toISOString()});}save();toast(files.length+" evidence file(s) added — link them to criteria from the list.");}
+async function importPackZip(file){const zip=await JSZip.loadAsync(file);const names=Object.keys(zip.files).filter(n=>!zip.files[n].dir&&/\.pdf$/i.test(n));if(!names.length){toast("No PDF files found in that zip.");return;}const importedAt=new Date().toISOString();let count=0;
+for(const n of names){const blob=await zip.files[n].async("blob");const base=n.split("/").pop();const packKey=/Core/i.test(base+n)?"g2-core":"g2-surveyor";const blobId=uid("tpl");await blobSet(blobId,blob);S.templates.push({id:uid("tplm"),packKey,fileName:base,blobId,sha256:await sha256(blob),size:blob.size,importedAt});count++;}
+[...new Set(S.templates.filter(t=>t.importedAt===importedAt).map(t=>t.packKey))].forEach(k=>S.packImports.push({packKey:k,zipName:file.name,fileCount:S.templates.filter(t=>t.packKey===k&&t.importedAt===importedAt).length,importedAt}));save();toast(count+" blank form(s) imported and stored in this browser.");}
+async function getPack(packKey){const pg=MP[packKey]||{};
+if(WORKER_BASE){toast("Fetching the latest pack from MTCS…");try{const res=await fetch(WORKER_BASE.replace(/\/$/,"")+"/?unit="+encodeURIComponent(packKey));if(!res.ok)throw new Error("Worker returned "+res.status);const blob=await res.blob();await importPackZip(new File([blob],packKey+"-all-files.zip",{type:"application/zip"}));render();return;}catch(e){toast("One-click fetch failed ("+e.message+"). Opening MTCS download instead — then use Import pack.");}}
+else toast("One-click fetch isn't live yet (free worker not deployed). Opening MTCS download — then tap Import pack (.zip).");
+if(pg.zip)window.open(pg.zip,"_blank","noopener");render();}
+async function exportZip(zip,name){downloadBlob(await zip.generateAsync({type:"blob"}),name);}
+async function buildActivityZip(p,a,kind){const crit={};Object.entries(p.criteria).forEach(([cid,by])=>{if(by[a.id])crit[cid]=by[a.id];});const ev=p.evidence.filter(e=>String(e.activityId)===String(a.id)||e.criteria.some(c=>crit[c]));
+const zip=new JSZip(),fileEntries=[];for(const e of ev){const blob=await blobGet(e.blobId);if(!blob)continue;const path="evidence/"+e.fileName;zip.file(path,blob);fileEntries.push({id:e.id,name:e.fileName,path,sha256:await sha256(blob),size:blob.size});}
+const manifest={kind,appVersion:APP_VERSION,portfolioId:p.id,activityId:a.id,candidate:p.name,candidateName:p.name,route:p.routeLabel,exportSeq:a.exportSeq+(kind==="activity-export"?1:0),baseVersion:a.version,exportedAt:new Date().toISOString(),files:fileEntries};
+zip.file("manifest.json",JSON.stringify(manifest,null,2));zip.file("activity.json",JSON.stringify({activity:a,criteria:crit,evidence:ev.map(e=>{const{blobId,...rest}=e;return rest;})},null,2));return{zip,manifest};}
+async function exportBackup(){const zip=new JSZip(),files=[];zip.file("data.json",JSON.stringify({portfolios:S.portfolios,templates:S.templates,packImports:S.packImports,shared:S.shared,settings:S.settings},null,2));
+const bids=new Set();S.portfolios.forEach(p=>p.evidence.forEach(e=>bids.add(e.blobId)));S.templates.forEach(t=>bids.add(t.blobId));S.shared.forEach(x=>(x.evidenceBlobs||[]).forEach(b=>bids.add(b)));
+for(const bid of bids){const blob=await blobGet(bid);if(!blob)continue;const path="blobs/"+bid;zip.file(path,blob);files.push({path,blobId:bid,sha256:await sha256(blob),size:blob.size});}
+zip.file("manifest.json",JSON.stringify({kind:"mtcs-full-backup",schema:1,appVersion:APP_VERSION,exportedAt:new Date().toISOString(),files},null,2));
+await exportZip(zip,"MTCS_Tracker_Backup_"+todayISO()+".zip");S.settings.lastBackupAt=new Date().toISOString();save();try{await kvSet("settings",S.settings);}catch(_){}toast("Backup downloaded. Keep it somewhere safe.");}
+async function parseBackup(file){const zip=await JSZip.loadAsync(file),mf=zip.file("manifest.json"),df=zip.file("data.json");if(!mf||!df)throw new Error("Not an MTCS Tracker backup.");const manifest=JSON.parse(await mf.async("string")),data=JSON.parse(await df.async("string"));if(manifest.kind!=="mtcs-full-backup")throw new Error("That zip isn't a full MTCS Tracker backup.");
+for(const f of manifest.files||[]){const en=zip.file(f.path);if(!en)throw new Error("Backup missing "+f.path);if(await sha256(await en.async("blob"))!==f.sha256)throw new Error("SHA-256 check failed: "+f.path);}return{zip,manifest,data};}
+async function applyBackup(parsed){for(const k of await blobKeys())await blobDel(k);for(const f of parsed.manifest.files||[])await blobSet(f.blobId,await parsed.zip.file(f.path).async("blob"));
+const d=parsed.data;S.portfolios=d.portfolios||[];S.templates=d.templates||[];S.packImports=d.packImports||[];S.shared=d.shared||[];S.settings=Object.assign({activeId:S.portfolios[0]?S.portfolios[0].id:null,lastBackupAt:null},d.settings||{});if(!S.portfolios.find(p=>p.id===S.settings.activeId))S.settings.activeId=S.portfolios[0]?S.portfolios[0].id:null;save();ui.pendingBackup=null;toast("Backup imported: "+S.portfolios.length+" portfolio(s) restored.");location.hash=S.portfolios.length?"#/dashboard":"#/";render();}
+async function importSharedPayload(zip,manifest,payload){const evidence=[],evidenceBlobs=[];for(const e of payload.evidence||[]){const en=(manifest.files||[]).find(f=>f.id===e.id);let blobId=null;if(en&&zip.file(en.path)){const blob=await zip.file(en.path).async("blob");if(await sha256(blob)!==en.sha256)throw new Error("Evidence SHA-256 check failed: "+e.fileName);blobId=uid("sblob");await blobSet(blobId,blob);evidenceBlobs.push(blobId);}evidence.push(Object.assign({},e,{blobId}));}
+const item={id:uid("shared"),importedAt:new Date().toISOString(),manifest,candidateName:manifest.candidateName||manifest.candidate||"Candidate",activity:payload.activity,criteria:payload.criteria||{},evidence,evidenceBlobs};S.shared.push(item);save();return item;}
+async function importSharedZip(file){const zip=await JSZip.loadAsync(file),mf=zip.file("manifest.json"),af=zip.file("activity.json");if(!mf||!af)throw new Error("Not an MTCS activity zip.");const item=await importSharedPayload(zip,JSON.parse(await mf.async("string")),JSON.parse(await af.async("string")));location.hash="#/shared/"+item.id;toast("Activity imported as a separate copy.");}
+async function stageReturn(file,actId){const p=active(),a=actOf(p,actId);if(!a)return;const zip=await JSZip.loadAsync(file),mf=zip.file("manifest.json"),af=zip.file("activity.json");if(!mf||!af){toast("That isn't an MTCS activity zip.");return;}
+const manifest=JSON.parse(await mf.async("string")),payload=JSON.parse(await af.async("string")),warnings=[];
+if(String(manifest.activityId)!==String(a.id))warnings.push("This return is for a different activity number.");
+if(Number(manifest.baseVersion)<a.version)warnings.push("Return is based on v"+manifest.baseVersion+" but your activity is v"+a.version+" — you may have edited it since exporting.");
+const count=o=>Object.values(o||{}).filter(c=>["Signed","Evidenced"].includes(c.status)).length;const myCrit={};Object.entries(p.criteria).forEach(([cid,by])=>{if(by[a.id])myCrit[cid]=by[a.id];});
+const expectedCount=count(myCrit),receivedCount=count(payload.criteria);if(receivedCount<expectedCount)warnings.push("Return has fewer signed/evidenced criteria ("+receivedCount+") than yours ("+expectedCount+").");
+for(const f of manifest.files||[]){const en=zip.file(f.path);if(!en){warnings.push("Missing evidence file: "+f.name);continue;}if(await sha256(await en.async("blob"))!==f.sha256)warnings.push("Evidence changed since export (hash mismatch): "+f.name);}
+ui.pendingReturn={zip,manifest,payload,activity:a,warnings,expectedCount,receivedCount,activityEvidence:p.evidence.filter(e=>String(e.activityId)===String(a.id)).length,pkgEvidence:(payload.evidence||[]).length};render();}
+async function applyReturn(asCopy){const r=ui.pendingReturn,p=active();if(!r)return;
+if(asCopy){await importSharedPayload(r.zip,r.manifest,r.payload);ui.pendingReturn=null;toast("Saved as a separate imported copy.");render();return;}
+const a=r.activity;a.versions=a.versions||[];a.versions.push({version:a.version,at:new Date().toISOString(),label:"Before assessor return import",snapshot:JSON.parse(JSON.stringify({activity:a,criteria:p.criteria}))});const keep=a.versions;Object.assign(a,r.payload.activity,{versions:keep,version:a.version+1});
+Object.keys(p.criteria).forEach(cid=>{delete p.criteria[cid][a.id];});Object.entries(r.payload.criteria||{}).forEach(([cid,cv])=>{p.criteria[cid]=p.criteria[cid]||{};p.criteria[cid][a.id]=cv;});
+for(const e of r.payload.evidence||[]){const en=(r.manifest.files||[]).find(f=>f.id===e.id);if(!en||!r.zip.file(en.path))continue;const blob=await r.zip.file(en.path).async("blob");const ex=p.evidence.find(x=>x.id===e.id);if(ex){await blobSet(ex.blobId,blob);Object.assign(ex,e,{blobId:ex.blobId});}else{const blobId=uid("blob");await blobSet(blobId,blob);p.evidence.push(Object.assign({},e,{blobId}));}}
+if(a.signedOn)a.status="Signed";save();ui.pendingReturn=null;toast("Return applied as v"+a.version+". Previous version kept for rollback.");render();}
+async function fillTemplate(tplId){const t=S.templates.find(x=>x.id===tplId),p=active();if(!t)return;const blob=await blobGet(t.blobId);if(!blob){toast("Template missing from this browser.");return;}
+const sel=document.getElementById("fill-act"),a=p&&sel?actOf(p,sel.value):null;
+try{const pdf=await PDFLib.PDFDocument.load(await blob.arrayBuffer()),form=pdf.getForm();const set=(n,v)=>{if(!v)return;try{form.getTextField(n).setText(String(v));}catch(_){}};
+set("Candidate Name",p?p.name:"");set("Candidate name",p?p.name:"");set("Date",todayISO());set("Date_2",todayISO());
+if(a){set("Activity Number 12 or 3",a.n);set("Work activity to be assessed",a.summary||a.title);set("Which performance criteria in the competences do you intend to assess",CRITS.filter(k=>cov(p,k.id,a.id).status!=="Gap").map(k=>k.id).join(", "));set("What date or dates will the assessment take place",a.dates);set("Where will the assessment take place eg name of vessel installation system workshop etc",a.where);set("Witness name if applicable",a.witness);set("Assessor name",a.assessorName||p.assessor.name);set("Please specify the reasons for your decision",a.feedbackText);set("Candidates comments",a.candidateComments);}
+downloadBlob(new Blob([await pdf.save()],{type:"application/pdf"}),t.fileName.replace(/\.pdf$/i,"")+"_FILLED.pdf");toast("Filled copy downloaded. Stored blank unchanged.");}
+catch(e){downloadBlob(blob,t.fileName);toast("Couldn't fill this PDF ("+e.message+") — blank downloaded instead.");}ui.fillTpl=null;render();}
+function render(){const{parts,params}=parse(),page=parts[0]||"";const cp=params.get("c");if(cp)ui.drawerCrit=cp;else if(page==="matrix"||page==="activity"||page==="dashboard")ui.drawerCrit=null;let html="";try{
+if(page==="")html=viewLanding();else if(page==="dashboard")html=viewDashboard();else if(page==="activities")html=viewActivities();else if(page==="activity")html=viewActivity(parts[1],params);else if(page==="matrix")html=viewMatrix(params);else if(page==="evidence")html=viewEvidence();else if(page==="forms")html=viewForms();else if(page==="backup")html=viewBackup();else if(page==="settings")html=viewSettings();else if(page==="more")html=viewMore();else if(page==="export")html=viewExport();else if(page==="shared")html=viewShared(parts[1]);else if(page==="assessor")html=viewAssessor(parts[1]);else html=viewLanding();}
+catch(e){console.error(e);html=`<div class="landing"><div class="card"><h1>Something went wrong</h1><p class="small">${esc(e.message)}</p><a class="btn" href="#/">Back</a></div></div>`;}
+document.getElementById("app").innerHTML=html;}
+document.addEventListener("click",async e=>{const el=e.target.closest("[data-action]");if(!el)return;const a=el.dataset.action,p=active();
+if(a==="goto")location.hash=el.dataset.href;
+else if(a==="pick-role"){ui.role=el.dataset.role;const r=ROLES.find(x=>x.key===ui.role);if(!r.grades.includes(ui.grade))ui.grade=r.grades[0];render();}
+else if(a==="pick-grade"){ui.grade=el.dataset.grade;render();}
+else if(a==="open-portfolio"){S.settings.activeId=el.dataset.id;save();location.hash="#/dashboard";render();}
+else if(a==="delete-portfolio"){if(confirm("Delete this portfolio from this browser? Export a backup first if needed.")){const pf=S.portfolios.find(x=>x.id===el.dataset.id);if(pf)for(const ev of pf.evidence)await blobDel(ev.blobId);S.portfolios=S.portfolios.filter(x=>x.id!==el.dataset.id);if(S.settings.activeId===el.dataset.id)S.settings.activeId=null;save();render();}}
+else if(a==="install"){if(deferredInstall){deferredInstall.prompt();deferredInstall.userChoice.then(()=>{deferredInstall=null;});}else{ui.modal="install";render();}}
+else if(a==="install-prompt"){if(deferredInstall){deferredInstall.prompt();deferredInstall=null;}ui.modal=null;render();}
+else if(a==="close-modal"){ui.preview=null;ui.modal=null;ui.fillTpl=null;render();}
+else if(a==="close-drawer"){ui.drawerCrit=null;history.replaceState(null,"",location.pathname+location.search+here());render();}
+else if(a==="open-crit"){ui.drawerCrit=el.dataset.crit;render();}
+else if(a==="mfilter"){ui.mState=el.dataset.f;render();}
+else if(a==="add-activity"&&p){const n=Math.max(0,...p.activities.map(x=>x.n))+1;p.activities.push(newActivity(n));save();render();}
+else if(a==="add-ukq"&&p){actOf(p,el.dataset.act).ukq.push({q:"",a:"",ok:""});save();render();}
+else if(a==="snapshot"&&p){const act=actOf(p,el.dataset.act);act.versions=act.versions||[];act.versions.push({version:act.version,at:new Date().toISOString(),label:"Manual snapshot",snapshot:JSON.parse(JSON.stringify({activity:act,criteria:p.criteria}))});save();toast("Snapshot saved in Version history.");render();}
+else if(a==="rollback"&&p){const act=actOf(p,el.dataset.act),v=(act.versions||[]).find(x=>x.version===Number(el.dataset.ver));if(v&&confirm("Restore v"+v.version+"? Current version kept as a new snapshot.")){act.versions.push({version:act.version,at:new Date().toISOString(),label:"Before rollback",snapshot:JSON.parse(JSON.stringify({activity:act,criteria:p.criteria}))});const keep=act.versions;Object.assign(act,v.snapshot.activity,{versions:keep});p.criteria=v.snapshot.criteria;save();toast("Rolled back to v"+v.version+".");render();}}
+else if(a==="preview-ev"&&p){const ev=p.evidence.find(x=>x.id===el.dataset.id),blob=ev&&await blobGet(ev.blobId);if(!blob){toast("File missing.");return;}ui.preview={title:ev.title,fileName:ev.fileName,mime:ev.mime,url:URL.createObjectURL(blob),text:(ev.mime.startsWith("text/")||/\.txt$/i.test(ev.fileName))?await blob.text():null};render();}
+else if(a==="download-ev"&&p){const ev=p.evidence.find(x=>x.id===el.dataset.id),blob=ev&&await blobGet(ev.blobId);if(blob)downloadBlob(blob,ev.fileName);}
+else if(a==="delete-ev"&&p){const ev=p.evidence.find(x=>x.id===el.dataset.id);if(ev&&confirm("Delete '"+ev.title+"'?")){await blobDel(ev.blobId);p.evidence=p.evidence.filter(x=>x.id!==ev.id);save();render();}}
+else if(a==="export-backup"){await exportBackup();render();}
+else if(a==="export-activity"&&p){const act=actOf(p,el.dataset.act),{zip}=await buildActivityZip(p,act,"activity-export");act.exportSeq++;save();await exportZip(zip,"Activity"+act.n+"_for_assessor.zip");toast("Activity zip downloaded — send it to your assessor.");render();}
+else if(a==="get-pack"){await getPack(el.dataset.pack);}
+else if(a==="open-template"){const t=S.templates.find(x=>x.id===el.dataset.id),blob=t&&await blobGet(t.blobId);if(blob)downloadBlob(blob,t.fileName);}
+else if(a==="fill-template"){ui.fillTpl=S.templates.find(x=>x.id===el.dataset.id);render();}
+else if(a==="do-fill"){await fillTemplate(ui.fillTpl.id);}
+else if(a==="cancel-backup-import"){ui.pendingBackup=null;render();}
+else if(a==="confirm-backup-import"){await applyBackup(ui.pendingBackup);}
+else if(a==="cancel-return"){ui.pendingReturn=null;render();}
+else if(a==="return-as-copy"){await applyReturn(true);}
+else if(a==="apply-return"){await applyReturn(false);}
+else if(a==="export-return"){const x=S.shared.find(s=>s.id===el.dataset.id);if(x){const fakeP={id:x.manifest.portfolioId,name:x.candidateName,routeLabel:x.manifest.route||"",evidence:x.evidence,criteria:{}};Object.entries(x.criteria).forEach(([cid,cv])=>{fakeP.criteria[cid]={[x.activity.id]:cv};});const{zip}=await buildActivityZip(fakeP,x.activity,"activity-return");await exportZip(zip,"Activity"+x.activity.n+"_reviewed_return.zip");toast("Reviewed zip downloaded — send it back to the candidate.");}}
+else if(a==="download-shared-ev"){const x=S.shared.find(s=>s.id===el.dataset.shared),ev=x&&x.evidence.find(v=>v.id===el.dataset.id),blob=ev&&ev.blobId&&await blobGet(ev.blobId);if(blob)downloadBlob(blob,ev.fileName);}
+else if(a==="delete-shared"){const x=S.shared.find(s=>s.id===el.dataset.id);if(x&&confirm("Delete this imported copy?")){for(const b of x.evidenceBlobs||[])await blobDel(b);S.shared=S.shared.filter(s=>s.id!==x.id);save();location.hash="#/";render();}}
+else if(a==="sign-lock"&&p){const act=actOf(p,el.dataset.act);CRITS.forEach(k=>{if(cov(p,k.id,act.id).status==="Evidenced")setCov(p,k.id,act.id,{status:"Signed"});});act.status="Signed";act.signedOn=todayISO();save();toast("Signed and locked (evidenced criteria marked Signed).");render();}
+});
+document.addEventListener("change",async e=>{const el=e.target,p=active();
+if(el.matches("[data-upload]")){const files=[...el.files];if(!files.length)return;try{
+if(el.dataset.upload==="evidence"&&p)await addEvidenceFiles(p,files,el.dataset.act||"");
+else if(el.dataset.upload==="pack")await importPackZip(files[0]);
+else if(el.dataset.upload==="backup")ui.pendingBackup=await parseBackup(files[0]);
+else if(el.dataset.upload==="shared")await importSharedZip(files[0]);
+else if(el.dataset.upload==="return"&&p)await stageReturn(files[0],el.dataset.act);
+}catch(err){console.error(err);toast("Import failed: "+err.message);}el.value="";render();return;}
+if(el.matches("[data-crit-status]")&&p){setCov(p,el.dataset.critStatus,el.dataset.act,{status:el.value});render();}
+else if(el.matches("[data-crit-code]")&&p){setCov(p,el.dataset.critCode,el.dataset.act,{code:el.value});render();}
+else if(el.matches("[data-ev-link]")&&p){const ev=p.evidence.find(x=>x.id===el.dataset.evLink);if(ev){ev.criteria=el.checked?[...new Set([...ev.criteria,el.dataset.crit])]:ev.criteria.filter(c=>c!==el.dataset.crit);save();}}
+else if(el.matches("[data-abind]")&&p){const act=actOf(p,el.dataset.act);if(act){act[el.dataset.abind]=el.value;save();}}
+else if(el.matches("[data-shared-crit]")){const x=S.shared.find(s=>s.id===el.dataset.sharedId);if(x){x.criteria[el.dataset.sharedCrit].status=el.value;save();}}
+else if(el.matches("[data-shared-code]")){const x=S.shared.find(s=>s.id===el.dataset.sharedId);if(x){x.criteria[el.dataset.sharedCode].code=el.value;save();}}
+});
+document.addEventListener("input",e=>{if(e.target.matches("[data-search=matrix]")){ui.mSearch=e.target.value;const pos=e.target.selectionStart;render();const s=document.querySelector("[data-search=matrix]");if(s){s.focus();s.setSelectionRange(pos,pos);}}});
+document.addEventListener("submit",e=>{const f=e.target,p=active();if(!f.matches("form"))return;e.preventDefault();const fd=new FormData(f);
+if(f.dataset.form==="create-portfolio"){const pf=newPortfolio(String(fd.get("name")).trim(),ui.role,ui.grade,fd.get("vessel"),fd.get("trip"));S.portfolios.push(pf);S.settings.activeId=pf.id;save();location.hash="#/dashboard";toast("Portfolio created and saved in this browser.");render();}
+else if(f.dataset.form==="activity-edit"&&p){const a=actOf(p,f.dataset.act);["summary","where","witness","assessorName","planText","feedbackText","candidateComments"].forEach(k=>a[k]=fd.get(k)||"");a.ukq=a.ukq.map((u,i)=>({q:fd.get("ukq-q-"+i)||"",a:fd.get("ukq-a-"+i)||"",ok:fd.get("ukq-ok-"+i)||""}));save();toast("Activity saved.");render();}
+else if(f.dataset.form==="evidence-edit"&&p){const ev=p.evidence.find(x=>x.id===f.dataset.id);if(ev){ev.title=fd.get("title");ev.date=fd.get("date");ev.tags=String(fd.get("tags")||"").split(",").map(s=>s.trim()).filter(Boolean);ev.activityId=fd.get("activityId");ev.criteria=String(fd.get("criteria")||"").split(",").map(s=>s.trim()).filter(Boolean);ev.redact=!!fd.get("redact");save();toast("Evidence updated.");render();}}
+else if(f.dataset.form==="portfolio-edit"&&p){p.name=fd.get("name");p.vessel=fd.get("vessel");p.trip=fd.get("trip");p.assessor={name:fd.get("assessorName"),email:fd.get("assessorEmail")};p.witness={name:fd.get("witnessName"),email:fd.get("witnessEmail")};save();toast("Settings saved.");render();}
+else if(f.dataset.form==="shared-edit"){const x=S.shared.find(s=>s.id===f.dataset.id);if(x){x.activity.feedbackText=fd.get("feedbackText");x.activity.assessorName=fd.get("assessorName");x.activity.signedOn=fd.get("signedOn");if(x.activity.signedOn)Object.values(x.criteria).forEach(c=>{if(c.status==="Evidenced")c.status="Signed";});save();toast("Shared changes saved.");render();}}
+});
+window.addEventListener("hashchange",()=>{ui.preview=null;ui.modal=null;render();});
+(async function boot(){document.getElementById("app").innerHTML=`<div class="landing"><div class="card">Loading your portfolios from this browser…</div></div>`;
+try{await idbOpen();S.portfolios=(await kvGet("portfolios"))||[];S.templates=(await kvGet("templates"))||[];S.packImports=(await kvGet("packImports"))||[];S.shared=(await kvGet("shared"))||[];S.settings=Object.assign(S.settings,(await kvGet("settings"))||{});}catch(e){console.error("IndexedDB unavailable",e);}
+render();})();
 })();
