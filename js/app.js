@@ -62,15 +62,15 @@
   const routeName = (r, g) => r.single ? r.name : `${g} ${r.name}`;
   const coreName = (r, g) => r.single ? "Core unit to be confirmed with MTCS" : `${g} Core`;
 
-  // ---------- Templates (official MTCS PDFs, unmodified) ----------
+  // ---------- Official MTCS forms: listed here, downloaded from MTCS (not hosted by this site) ----------
   const TPL = window.TEMPLATES || [];
-  const TBASE = window.TEMPLATE_BASE || "";
-  const tplHref = t => TBASE + t.path.split("/").map(encodeURIComponent).join("/");
+  const MP = window.MTCS_PAGES || {};
+  const MTCS_NOTE = "Official forms are © MTCS Ltd. Download the current versions from MTCS.";
   const tplFind = (unit, kind, comp) => TPL.find(t => t.unit === unit && t.kind === kind && (comp == null || t.comp === comp));
-  const kb = b => b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.round(b / 1024) + " KB";
-  const tplLink = (t, label, tag) => t ? `<a class="tpl-link" href="${tplHref(t)}" download="${esc(t.file)}" target="_blank" rel="noopener"><span aria-hidden="true">⤓</span><span class="grow"><b>${esc(label || t.label)}</b><span class="fname">${esc(t.file)} · ${kb(t.bytes)}</span>${tag || ""}</span></a>` : "";
+  const tplLink = (t, label, tag) => t ? `<div class="tpl-item"><span class="tpl-ico" aria-hidden="true">📄</span><span class="grow"><b>${esc(label || t.label)}</b><span class="fname">${esc(t.file)}${t.mtcsType === "zip" ? " (inside the MTCS ‘All Files’ zip)" : ""}</span>${tag || ""}
+      <span class="tpl-acts">${t.mtcsUrl ? `<a class="btn sm primary" href="${esc(t.mtcsUrl)}" target="_blank" rel="noopener" title="Opens MTCS Online in a new tab">Download from MTCS ↗</a>` : `<a class="btn sm primary" href="${esc((MP[t.pack] || MP["g2-surveyor"] || {}).url || "")}" target="_blank" rel="noopener">Download from MTCS ↗</a>`}<button class="btn sm" data-toast="Layout only. Later you'll pick the PDF you downloaded and it's kept in this browser.">Add my downloaded copy</button></span></span></div>` : "";
   const shortLabel = txt => { const s = txt.replace(/^(Demonstrates|Has demonstrated|Has)\s+(the ability to|an understanding of|a basic understanding of|a good understanding of|a willingness to|knowledge of|an awareness of|the correct usage of)?\s*/i, ""); return s.charAt(0).toUpperCase() + s.slice(1); };
-  const DISCLAIMER = `<footer class="disclaimer">Prototype for discussion. Not affiliated with or endorsed by MTCS or IMarEST. Sample data only. Official forms are © MTCS Ltd, provided unmodified; check MTCS Online for the latest versions.</footer>`;
+  const DISCLAIMER = `<footer class="disclaimer">Prototype for discussion. Not affiliated with or endorsed by MTCS or IMarEST. Sample data only. Official forms are © MTCS Ltd. Download the current versions from MTCS.</footer>`;
 
   // ---------- Router ----------
   function parse() {
@@ -320,7 +320,7 @@
       </section>
 
       <section class="card ag-forms"><div class="card-head"><h2>Blank MTCS forms</h2><a class="right btn sm ghost" href="#/forms">All forms →</a></div>
-        <p class="tiny muted" style="margin:0 0 8px">Official templates, unmodified. One plan and one feedback form per unit for this activity.</p>
+        <p class="tiny muted" style="margin:0 0 8px">${MTCS_NOTE} One plan and one feedback form per unit for this activity.</p>
         <div class="tpl-list">
           ${f("surveyor", "plan", "Assessment Plan – G2 Surveyor")}${f("core", "plan", "Assessment Plan – G2 Core")}
           ${f("surveyor", "feedback", "Feedback Form – G2 Surveyor")}${f("core", "feedback", "Feedback Form – G2 Core")}
@@ -418,7 +418,7 @@
       <div class="body">
         <div class="quote">${esc(k.text)}</div>
         <dl class="kv small"><dt>Competence</dt><dd>${esc(k.comp.title)}</dd><dt>IMCA reference</dt><dd>${esc(k.comp.imca)}</dd><dt>Source form</dt><dd class="fname">${esc(k.comp.file)}</dd></dl>
-        <div class="tpl-list" style="margin-top:10px">${tplLink(sheet, "Blank competence sheet")}${tplLink(ukqT, "Blank UKQ sheet")}</div>
+        <div class="tpl-list" style="margin-top:10px">${tplLink(sheet, "Blank competence sheet")}${tplLink(ukqT, "Blank UKQ sheet")}</div><p class="tiny muted" style="margin:0">${MTCS_NOTE}</p>
         ${gapNote ? `<div class="card" style="background:var(--warn-bg);border-color:#f0dfa6;margin-top:14px;padding:12px"><b class="small">Note</b><p class="small" style="margin:4px 0 0">${gapNote}</p></div>` : ""}
         <h3 style="margin-top:18px">By activity</h3>
         <div class="table-wrap"><table><thead><tr><th>Activity</th><th>Code</th><th>Status</th><th>Assessor</th></tr></thead><tbody>${actRows}</tbody></table></div>
@@ -586,7 +586,7 @@
     const t = totals();
     const f = (name, st, note) => `<div class="file-line"><span aria-hidden="true">📄</span><div class="grow"><span class="fname" style="color:var(--ink)">${name}</span>${note ? `<div class="tiny muted">${note}</div>` : ""}</div>${st === "ready" ? `<span class="pill signed">Ready</span>` : st === "wait" ? `<span class="pill mapped">Awaiting signature</span>` : st === "ink" ? `<span class="pill warn">Ink, scan needed</span>` : `<span class="pill planned">Not started</span>`}</div>`;
     const area = (n, title, files, note) => `<section class="card"><div class="area"><div class="n">${n}</div><div><h3 style="margin:4px 0 2px">${title}</h3>${note ? `<p class="small muted" style="margin:0 0 8px">${note}</p>` : ""}${files}</div>
-      <div class="area-act"><button class="btn sm" data-toast="Would preview the merged PDF.">Preview</button><a class="btn sm ghost" href="#/forms">Blank forms</a></div></div></section>`;
+      <div class="area-act"><button class="btn sm" data-toast="Would preview the merged PDF.">Preview</button><a class="btn sm ghost" href="#/forms">Blank forms (MTCS)</a></div></div></section>`;
     const acts = (label, sts) => [1, 2, 3].map(i => f(`Activity ${i} - ${label}.pdf`, sts[i - 1])).join("");
     const blockers = [
       ["gap", `${t.gap} criteria with a gap: S09d, S09f`, "#/matrix?c=S09d"],
@@ -635,7 +635,7 @@
       <div class="pack ${p.status === "active" ? "active" : "later"}">
         <div style="display:flex;align-items:center;gap:8px"><b>${esc(p.label)}</b><span class="pill ${p.status === "active" ? "signed" : "planned"}" style="margin-left:auto">${p.status === "active" ? "Loaded" : "Coming soon"}</span></div>
         <div class="small">GA course ${p.gaCourse}${CORE_COURSE[p.grade] ? ` · Core course ${CORE_COURSE[p.grade]}` : ""}${p.note ? " · " + esc(p.note) : ""}</div>
-        ${p.status === "active" ? `<div class="small">${COMPS.length} competences · ${CRITS.length} criteria · ${TPL.filter(t => t.pack !== "guidance").length} official forms</div>` : `<div class="small">Criteria not loaded yet</div>`}
+        ${p.status === "active" ? `<div class="small">${COMPS.length} competences · ${CRITS.length} criteria · ${TPL.filter(t => t.pack !== "guidance").length} MTCS forms linked</div>` : `<div class="small">Criteria not loaded yet</div>`}
       </div>`).join("")}</div></div>`;
     return `
     <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Settings</div><h1>Settings</h1></div></div>
@@ -666,7 +666,7 @@
           <label class="checkline"><input type="checkbox" data-ui="staleBackup" data-val="toggle" ${ui.staleBackup ? "checked" : ""}> Prototype only: pretend the last backup was 9 days ago</label></section>
         <section class="card"><h2>About this prototype</h2>
           <p class="small">This is a layout prototype for discussion. It is <b>not affiliated with or endorsed by MTCS or IMarEST</b>. All names, dates and evidence are sample data. Nothing is saved, sent or signed.</p>
-          <p class="small muted">The official MTCS forms under Forms and templates are © MTCS Ltd and are provided unmodified with their original file names. Always check MTCS Online for the current versions. The app never submits to MTCS and never signs for anyone.</p></section>
+          <p class="small muted">The official MTCS forms listed under Forms and templates are © MTCS Ltd and are not hosted here: each button opens the download on MTCS Online. The app never submits to MTCS and never signs for anyone.</p></section>
         <section class="card"><h2>Assessor training</h2><p class="small muted">Later: an assessor side to track your own Stage 2 candidates.</p><span class="pill planned">Coming soon</span></section>
       </div>
     </div>`;
@@ -679,7 +679,7 @@
     <section class="card more-list">
       ${r("#/backup", "☁", "Backup and restore", `Last backup ${backupDays()} days ago`, backupDays() > 7 ? `<span class="pill gap">${backupDays()} days</span>` : "")}
       ${r("#/export", "⇪", "Export for MTCS", "Zip by upload area, checklist")}
-      ${r("#/forms", "📄", "Forms and templates", "Official blank MTCS forms")}
+      ${r("#/forms", "📄", "Forms and templates", "Links to the official MTCS forms")}
       ${r("#/matrix?f=all", "▦", "Coverage matrix (all)", "All 79 criteria × 3 activities")}
       ${r("#/settings", "⚙", "Settings", "Route, packs, profile, links, about")}
       ${r("#/", "⇄", "Change route", "Pick another role or grade")}
@@ -694,7 +694,8 @@
     const byArea = n => dedupe(TPL.filter(t => t.area === n && t.kind !== "readme").map(t => Object.assign({}, t)));
     return `
     <div class="page-head"><div><div class="crumb"><a href="#/dashboard">Dashboard</a> › Portfolio</div><h1>Forms and templates</h1>
-      <p class="muted" style="margin:0">Official blank MTCS documents for G2 Surveyor and G2 Core, unmodified, with their original file names. Fill them in on the official PDF. © MTCS Ltd. Check MTCS Online for the latest versions before you submit.</p></div></div>
+      <p class="muted" style="margin:0">${MTCS_NOTE} Each button opens the form on MTCS Online (free, no login needed for these files). Fill it in on the official PDF.</p>
+      <div class="btn-row">${["g2-surveyor", "g2-core"].filter(k => MP[k]).map(k => `<a class="btn" href="${esc(MP[k].url)}" target="_blank" rel="noopener">${k === "g2-core" ? "Grade II Core page" : "Grade II Surveyor page"} on MTCS Online ↗</a><a class="btn" href="${esc(MP[k].zip)}" target="_blank" rel="noopener">${k === "g2-core" ? "G2 Core" : "G2 Surveyor"} all files (.zip) ↗</a>`).join("")}${MP.howTo ? `<a class="btn ghost" href="${esc(MP.howTo.url)}" target="_blank" rel="noopener">How MTCS says to get the forms ↗</a>` : ""}</div></div></div>
     <div class="stack">
       <section class="card"><div class="card-head"><h2>Start here</h2></div><ul class="list tpl-ul">
         ${dedupe(TPL.filter(t => t.kind === "readme").map(t => Object.assign({}, t))).map(row).join("")}${TPL.filter(t => t.kind === "guidance").map(t => `<li>${tplLink(t, null, `<span class="pill planned unit-pill">MTCS guidance</span>`)}</li>`).join("")}</ul></section>
