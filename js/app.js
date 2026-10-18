@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.2";
+const APP_VERSION="0.2.3";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -51,7 +51,7 @@ let undoStack=[];
 let deferredInstall=null;
 window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstall=e;render();});
 if("serviceWorker" in navigator&&/^https?:$/.test(location.protocol)){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(err=>console.warn("SW failed",err)));}
-function newActivity(n){return{id:String(n),n,title:"Activity "+n,planCritIds:[],dates:"",summary:"",where:"",witness:"",assessorName:"",planText:"",feedbackText:"",candidateComments:"",status:"Gathering evidence",planAgreed:"",signedOn:"",exportSeq:0,version:1,versions:[],ukq:[{q:"",a:"",ok:""}]};}
+function newActivity(n){return{id:String(n),n,title:"Activity "+n,planCritIds:[],dates:"",summary:"",where:"",witness:"",assessorName:"",planText:"",feedbackText:"",candidateComments:"",status:"Gathering evidence",planAgreed:"",signedOn:"",exportSeq:0,version:1,versions:[],ukq:[{q:"",a:"",ok:""}],assessorSig:null,candidateSignedAt:null,sigAudit:[]};}
 function newPortfolio(name,roleKey,grade,assessedBy){const role=ROLES.find(r=>r.key===roleKey);return{id:uid("pf"),name,roleKey,role:role.name,grade,assessedBy:assessedBy||"",genPackId:null,routeLabel:grade+" "+role.name+(coreLabelForGrade(grade)?" + "+coreLabelForGrade(grade):""),formsPromptSeen:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),activities:[newActivity(1),newActivity(2),newActivity(3)],criteria:{},evidence:[]};}
 const actOf=(p,id)=>p.activities.find(a=>a.id===String(id));
 const cov=(p,crit,act)=>(p.criteria[crit]||{})[String(act)]||{status:"Gap",code:""};
@@ -59,6 +59,11 @@ function critOverall(p,id){let best="Gap";const rank={Gap:0,Planned:1,Evidenced:
 function totals(p){const t={Signed:0,Evidenced:0,Planned:0,Gap:0,direct:0,coded:0};CRITS.forEach(k=>t[critOverall(p,k.id)]++);Object.values(p.criteria).forEach(by=>Object.values(by).forEach(c=>{if(c.code){t.coded++;if(c.code==="O"||c.code==="P")t.direct++;}}));t.directPct=t.coded?Math.round(100*t.direct/t.coded):0;return t;}
 const evLinkedCrit=(p,critId)=>p.evidence.filter(e=>e.criteria.includes(critId));
 const cleanTitle=n=>String(n||"").replace(/\.[^.]+$/,"").replace(/[_\-]+/g," ").replace(/\s*(final|copy|v\d+)\s*$/i,"").trim()||"Evidence";
+const safeName=s=>String(s==null?"":s).replace(/[\\/:*?"<>|#]/g,"-").replace(/\s+/g," ").trim().replace(/\.+$/,"").slice(0,110)||"file";
+const SIG_NOTE="Signature image \u2014 not a legal e-signature service; MTCS ink signature requirements still apply";
+const CODE_LABEL={O:"Observation",P:"Work Product",W:"Written",Q:"Questioning","N/C":"Not Covered","N/A":"Not Applicable"};
+const csvCell=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+const planCritOf=(p,a)=>{const ids=(a&&a.planCritIds&&a.planCritIds.length)?a.planCritIds:CRITS.filter(k=>a&&cov(p,k.id,a.id).status!=="Gap").map(k=>k.id);return ids.map(id=>critById(id)).filter(Boolean);};
 const KEYWORD_SUGGEST=[[/svp|sound velocity/i,["S07c","S07d"]],[/patch test|calibration/i,["S09a","S09b","S09c"]],[/usbl/i,["S08e","S09c"]],[/mbes|multibeam/i,["S09b","S04a"]],[/geodet|geodesy|gnss/i,["S01c","S10a"]],[/handover/i,["C2c","C3f"]],[/induction|safety|muster/i,["C1a","C1i"]],[/online log|logging/i,["S05b","S05d"]],[/tss/i,["S09a"]],[/lbl/i,["S08f"]]];
 function suggestCriteria(name){const out=[];const text=String(name||"");let m;const re=/(S\d{2}[a-z]|C\d[a-z])/ig;while((m=re.exec(text))){const id=m[1][0].toUpperCase()+m[1].slice(1).toLowerCase();if(critById(id)&&!out.includes(id))out.push(id);}KEYWORD_SUGGEST.forEach(([rx,ids])=>{if(rx.test(text))ids.forEach(id=>{if(critById(id)&&!out.includes(id))out.push(id);});});return out.slice(0,4);}
 function fileDateISO(f){try{const d=new Date(f.lastModified);return isNaN(d)?todayISO():d.toISOString().slice(0,10);}catch(_){return todayISO();}}
@@ -163,7 +168,12 @@ ${a.ukq.map((u,i)=>`<div class="field"><label>Question ${i+1}</label><input name
 <details class="card"><summary><h2 style="display:inline">Send history, import return &amp; versions</h2></summary>
 <div class="share-block"><b>Import assessor return (.zip)</b><p class="small muted">Review first; import never silently overwrites, with rollback.</p><div class="btn-row"><label class="btn">⤒ Import return<input type="file" accept=".zip" hidden data-upload="return" data-act="${a.id}"></label><button class="btn" data-action="export-activity" data-act="${a.id}" data-testid="export-activity">Download activity zip</button><button class="btn" data-action="snapshot" data-act="${a.id}">Save version snapshot</button></div><p class="tiny muted">Exports so far: ${a.exportSeq} · current version v${a.version}</p></div>
 <div class="share-block"><b>Version history</b><ul class="list small"><li><span class="pill signed">v${a.version}</span><div class="grow">Current</div></li>${(a.versions||[]).slice().reverse().map(v=>`<li><span class="pill planned">v${v.version}</span><div class="grow">${esc(v.label)} · ${fmtDate(v.at)}</div><button class="btn sm" data-action="rollback" data-act="${a.id}" data-ver="${v.version}">Restore</button></li>`).join("")||`<li class="muted small">No earlier versions yet.</li>`}</ul></div></details>
-<section class="card send-end-card"><button class="btn primary block send-end-btn" data-action="send-preflight" data-act="${a.id}" data-testid="send-btn">Send…</button></section>`,"activities");}
+<section class="card" data-testid="sign-card"><div class="card-head"><h2>Signatures &amp; forms preview</h2></div>
+<p class="small muted">${SIG_NOTE}. Candidate signing uses your Profile signature only when you tap it; nothing is auto-signed.</p>
+<div class="share-block"><b>Candidate signature</b><p class="small muted">${S.profile.signatureBlobId?"Profile signature saved on this device.":"No Profile signature yet \u2014 add one in More \u2192 Profile."}</p>${a.candidateSignedAt?`<p class="small" data-testid="candidate-signed">\u2713 You signed this activity on ${fmtDate(a.candidateSignedAt)} <button class="btn sm ghost" data-action="candidate-unsign" data-act="${a.id}">Undo sign</button></p>`:S.profile.signatureBlobId?`<div class="btn-row"><button class="btn primary" data-action="candidate-sign" data-act="${a.id}" data-testid="candidate-sign">Add my e-signature to this activity</button></div>`:`<div class="btn-row"><a class="btn" href="#/profile">Go to Profile signature</a></div>`}</div>
+<div class="share-block"><b>Assessor signature</b>${a.assessorSig?`<p class="small" data-testid="assessor-signed">\u2713 Signed by ${esc(a.assessorSig.name||a.assessorName||"Assessor")} on ${fmtDate(a.assessorSig.signedAt)} (${esc(a.assessorSig.source||"drawn")})</p><div class="btn-row"><button class="btn" data-action="assessor-sign-open" data-act="${a.id}" data-testid="assessor-sign-open">Replace assessor signature</button></div>`:`<p class="small muted">Not signed yet.</p><div class="btn-row"><button class="btn primary" data-action="assessor-sign-open" data-act="${a.id}" data-testid="assessor-sign-open">Assessor sign activity</button></div>`}</div>
+<div class="btn-row"><button class="btn" data-action="submission-preview-open" data-act="${a.id}" data-testid="preview-forms">Preview forms</button><button class="btn" data-action="submission-export" data-act="${a.id}">Download this activity\u2019s submission forms+evidence</button></div></section>
+<section class="card send-end-card"><button class="btn primary block send-end-btn" data-action="send-preflight" data-act="${a.id}" data-testid="send-btn">Send\u2026</button></section>`,"activities");}
 function visibleCritIds(p){const q=ui.mSearch.toLowerCase();const ids=[];COMPS.forEach(c=>c.criteria.forEach(k=>{if((ui.mState==="all"||critOverall(p,k.id)===ui.mState)&&(!q||k.id.toLowerCase().includes(q)||k.text.toLowerCase().includes(q)))ids.push(k.id);}));return ids;}
 function viewMatrix(params){const p=active();if(!p){location.hash="#/";return"";}if(!hasPack(p))return shell("Criteria",`<div class="card" data-testid="criteria-locked"><h2>Criteria not built yet</h2><div class="btn-row"><a class="btn primary" href="#/forms">Get my forms pack</a>${S.templates.some(x=>/Competence\d+\.pdf$/i.test(x.fileName))?`<button class="btn" data-action="build-pack-stored" data-testid="build-pack-stored">Build criteria from stored forms</button>`:""}</div></div>`,"matrix");if(params&&params.get("f"))ui.mState={gap:"Gap",signed:"Signed",evidenced:"Evidenced",planned:"Planned"}[params.get("f")]||ui.mState;
 const q=ui.mSearch.toLowerCase();ui._visibleCritIds=visibleCritIds(p);const scoped=ui.critScope!=="all";
@@ -219,7 +229,8 @@ ${S.templates.length?`<details><summary class="small">Stored forms (${S.template
 <section class="card"><h2>App</h2><p class="small muted">MTCS Tracker Beta v${APP_VERSION} · local-first, no accounts. Not a full release — promotion to v1.0 only when layout and functions are settled.</p>${p?`<div class="btn-row"><button class="btn" data-action="delete-portfolio" data-id="${p.id}">Delete this portfolio</button></div>`:""}</section>`,"settings");}
 function viewMore(){const p=active();return shell("More",`<section class="card more-list">${[["#/profile","👤","Profile","Name and signature"],["#/forms","📄","Forms & packs","MTCS blank templates"],["#/export","⤓","Export / submission","Checklist and backup"],["#/backup","☁️","Backup & restore","Export or import a full backup"],["#/settings","⚙️","Settings","Forms management and app"]].map(x=>`<a class="more-row" href="${x[0]}" ${x[0]==="#/profile"?'data-testid="profile-banner"':""}><span class="role-ico sm">${x[1]}</span><span class="grow"><b>${x[2]}</b><span class="small muted">${x[3]}</span></span><span class="chev">›</span></a>`).join("")}</section>`,"more");}
 function viewProfile(){const p=active();return shell("Profile",`<div class="btn-row"><a class="btn sm" href="#/more">‹ More</a></div>`+profileCardHTML()+(p?`<section class="card"><div class="card-head"><h2>Portfolio assessor</h2>${savedInd()}</div><div class="field"><label>Assessed by (this portfolio)</label><input value="${esc(p.assessedBy||"")}" data-pbind="assessedBy" placeholder="Leave blank until your assessor is confirmed" data-testid="profile-assessedby"></div><p class="tiny muted">This is the portfolio-level assessor name. An assessor for a single activity is set on that activity instead.</p></section>`:`<section class="card"><p class="small muted">Open a portfolio to set its assessor name.</p></section>`),"more");}
-function viewExport(){const p=active();if(!p){location.hash="#/";return"";}const t=totals(p);return shell("Export",`<div class="page-head"><div><h1>Export / submission</h1><p class="muted">Checklist only — this app never submits to MTCS for you.</p></div><div class="actions"><button class="btn primary" data-action="export-backup">Download full portfolio backup (.zip)</button></div></div><section class="card"><ul class="list"><li><span class="dot" style="background:var(--planned-dot)"></span><div class="grow"><b>Criteria: ${t.Signed} signed, ${t.Evidenced} evidenced, ${t.Gap} gaps</b><div class="small muted">All criteria in your generated pack should be covered across at least three activities.</div></div></li><li><span class="dot" style="background:${(S.packImports&&S.packImports.length)?"var(--signed)":"var(--gap)"}"></span><div class="grow"><b>Forms pack</b><div class="small muted">${S.packImports&&S.packImports.length?"Imported "+fmtDate(S.packImports[0].importedAt):"Not imported yet"}</div></div></li><li><span class="dot" style="background:var(--planned-dot)"></span><div class="grow"><b>Evidence files: ${p.evidence.length}</b><div class="small muted">${p.evidence.filter(e=>e.redact).length} flagged for client-data check.</div></div></li></ul></section>`,"export");}
+function viewExport(){const p=active();if(!p){location.hash="#/";return"";}const t=totals(p);return shell("Export",`<div class="page-head"><div><h1>Export / submission</h1><p class="muted">Checklist only \u2014 this app never submits to MTCS for you, and never emails anyone.</p></div><div class="actions"><button class="btn" data-action="export-backup">Download full portfolio backup (.zip)</button></div></div>
+<section class="card" data-testid="submission-card"><div class="card-head"><h2>MTCS submission pack</h2><span class="right pill planned">Download only</span></div><p class="small">Builds a zip you can send to MTCS yourself: filled copies of your stored official forms (blanks never changed), all evidence in labelled Activity folders, and an index mapping every file to its criteria. Preview first to check names, dates, criteria and signatures.</p><div class="btn-row"><button class="btn primary lg" data-action="submission-preview-open" data-testid="submission-preview-open">Preview submission pack</button><button class="btn" data-action="submission-export" data-testid="submission-export">Download submission pack (.zip)</button></div><p class="tiny muted">${SIG_NOTE}</p></section><section class="card"><ul class="list"><li><span class="dot" style="background:var(--planned-dot)"></span><div class="grow"><b>Criteria: ${t.Signed} signed, ${t.Evidenced} evidenced, ${t.Gap} gaps</b><div class="small muted">All criteria in your generated pack should be covered across at least three activities.</div></div></li><li><span class="dot" style="background:${(S.packImports&&S.packImports.length)?"var(--signed)":"var(--gap)"}"></span><div class="grow"><b>Forms pack</b><div class="small muted">${S.packImports&&S.packImports.length?"Imported "+fmtDate(S.packImports[0].importedAt):"Not imported yet"}</div></div></li><li><span class="dot" style="background:var(--planned-dot)"></span><div class="grow"><b>Evidence files: ${p.evidence.length}</b><div class="small muted">${p.evidence.filter(e=>e.redact).length} flagged for client-data check.</div></div></li></ul></section>`,"export");}
 function sharedCritOf(x,cid){if(!x.genPack)return null;let found=null;(x.genPack.units||[]).forEach(u=>(u.competences||[]).forEach(c=>(c.criteria||[]).forEach(k=>{if(k.id===cid)found=k;})));return found;}
 function viewShared(id){const x=S.shared.find(s=>s.id===id);if(!x)return shell("Shared",`<div class="card">That shared activity isn't in this browser. <a href="#/">Import it from the opening screen</a>.</div>`,"more");const a=x.activity;
 return shell("Shared activity",`<div class="link-shell" style="padding:0"><div class="imported-banner"><b>Imported copy — not your portfolio</b><span>From ${esc(x.candidateName)} · exported ${fmtDate(x.manifest.exportedAt)} · package v${esc(x.manifest.exportSeq)} · based on v${esc(x.manifest.baseVersion)}</span></div>
@@ -287,6 +298,16 @@ return `<div class="scrim" data-action="close-modal"></div><div class="modal" ro
 <li><span class="dot" style="background:${age===null||age>7?"var(--gap)":"var(--signed)"}"></span><div class="grow"><b>${age===null?"No backup yet":age>7?("Last backup "+age+" days ago — a fresh backup runs first as part of Send"):("Backed up "+age+" day(s) ago")}</b></div></li>
 <li><span class="dot" style="background:${packs?"var(--signed)":"var(--mapped-dot)"}"></span><div class="grow"><b>${packs?"Forms packs imported":"Forms packs not fully imported"}</b><div class="muted">Only matters for filling official forms, not for this zip.</div></div></li></ul></div><footer><button class="btn primary" data-action="preflight-continue" data-testid="preflight-continue">Continue &amp; download</button></footer></div>`;}}
 if(ui.modal==="bulk-signed"){return `<div class="scrim"></div><div class="modal" role="dialog" data-testid="bulk-signed"><header><h2>Mark ${ui.selCrit.size} as Signed?</h2></header><div class="body"><p>Signed is normally your assessor's act. This will mark <b>${ui.selCrit.size} criteria</b> as Signed in the chosen activity. You can Undo afterwards.</p></div><footer><button class="btn" data-action="close-modal">Cancel</button><button class="btn primary" data-action="bulk-signed-confirm" data-testid="bulk-signed-confirm">Mark ${ui.selCrit.size} as Signed</button></footer></div>`;}
+if(ui.modal==="assessor-sign"){const p=active();const a=p?actOf(p,ui.assessorSignAct):null;if(a)return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog" data-testid="assessor-sign-modal"><header><h2>Assessor sign Activity ${a.n}</h2><button class="close" data-action="close-modal">\u2715</button></header><div class="body"><p class="small muted">${SIG_NOTE}</p><div class="field"><label>Assessor name</label><input id="assessor-sig-name" data-testid="assessor-sig-name" value="${esc(a.assessorName||p.assessedBy||"")}" placeholder="Assessor printed name (BLOCK CAPITALS on forms)"></div><canvas id="assessor-sig-pad" class="sig-pad" width="640" height="240" data-testid="assessor-sig-pad"></canvas><div class="btn-row"><label class="btn">Upload signature image<input type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" hidden data-upload="assessor-signature" data-act="${a.id}" data-testid="assessor-sig-upload"></label></div><p class="tiny muted">Signing applies this signature image to this activity\u2019s paperwork (Assessment Plan, Feedback, competence / sign-off / testimony forms where applicable) when a submission pack or filled copy is built, with printed name and date. It is stored per activity on this device.</p></div><footer><button class="btn" data-action="close-modal">Cancel</button><button class="btn primary" data-action="assessor-sign-save" data-act="${a.id}" data-testid="assessor-sign-save">Sign activity</button></footer></div>`;}
+if(ui.modal==="submission-preview"){const p=active();if(p){const sum=buildSubmissionSummary(p,ui.subScope);const scopeAct=ui.subScope?actOf(p,ui.subScope):null;const firstForm=sum.forms[0];return `<div class="scrim" data-action="close-modal"></div><div class="modal merge" role="dialog" data-testid="submission-preview"><header><h2>Submission pack preview${scopeAct?" \u2014 Activity "+scopeAct.n:""}</h2><button class="close" data-action="close-modal">\u2715</button></header><div class="body">
+<p class="small muted">Representative preview \u2014 filled PDFs are built on download; check the values below match what will appear. Root folder: <b>${esc(sum.root)}/</b></p>
+<div class="warn-box" data-testid="submission-warnings"><b>${sum.warnings.length?("Check before exporting ("+sum.warnings.length+")"):"\u2713 No warnings"}</b>${sum.warnings.length?`<ul>${sum.warnings.map(w=>`<li class="small">${esc(w)}</li>`).join("")}</ul>`:""}</div>
+<h3>Pack contents</h3><pre class="small" style="white-space:pre-wrap;background:#f6f8f9;padding:10px;border-radius:8px" data-testid="submission-tree">${esc(sum.root+"/\n 00-Index/ index.html \u00b7 manifest.csv \u00b7 manifest.json \u00b7 fill-log.txt\n 01-Forms/ "+sum.forms.length+" filled form(s)\n 02-Evidence/ "+sum.evEntries.length+" file(s)")}</pre>
+<h3>Forms to be filled (${sum.forms.length})</h3><ul class="list small">${sum.forms.map(f=>`<li><div class="grow"><b>${esc(f.kind)}</b> \u00b7 ${esc(f.tpl.fileName)}${f.act?" \u00b7 Activity "+f.act.n:""}<div class="fname">Candidate: ${esc((p.name||"\u2014").toUpperCase())} \u00b7 Assessor: ${esc(((f.act&&f.act.assessorName)||p.assessedBy||"\u2014").toUpperCase())} \u00b7 Criteria: ${f.act?esc(planCritOf(p,f.act).map(k=>k.id).join(", ")||"none"):""} \u00b7 Candidate sig: ${f.act&&f.act.candidateSignedAt?"signed \u2713":"not signed"} \u00b7 Assessor sig: ${f.act&&f.act.assessorSig?"signed \u2713":"not signed"}</div></div></li>`).join("")||`<li class="muted">No stored blank forms \u2014 import a forms pack first.</li>`}</ul>
+<h3>Evidence index (${sum.evEntries.length})</h3><ul class="list small">${sum.evEntries.map(x=>`<li><div class="grow"><b class="small">${esc(x.path.split("/").pop())}</b><div class="fname">${esc(x.statuses||"UNMAPPED")}</div></div></li>`).join("")||`<li class="muted">No evidence in scope.</li>`}</ul>
+${firstForm?`<h3>Representative filled form</h3><div class="card" style="margin:0"><b>${esc(firstForm.kind)} (representative mock \u2014 not the real PDF page)</b><p class="small">Candidate Name: ${(p.name||"").toUpperCase()}<br>Date: ${todayISO()}<br>${firstForm.act?("Activity Number: "+firstForm.act.n+"<br>Work activity: "+esc(firstForm.act.summary||firstForm.act.title)+"<br>Criteria covered: "+esc(planCritOf(p,firstForm.act).map(k=>k.id+" \u2014 "+k.text).join("; "))):""}<br>Assessor: ${esc(((firstForm.act&&firstForm.act.assessorName)||p.assessedBy||""))}<br>Signatures: candidate ${firstForm.act&&firstForm.act.candidateSignedAt?"image placed":"\u2014"} \u00b7 assessor ${firstForm.act&&firstForm.act.assessorSig?"image placed":"\u2014"}</p><p class="tiny muted">${SIG_NOTE}</p></div>`:""}
+${sum.warnings.length?`<label class="checkline" style="margin-top:10px"><input type="checkbox" id="sub-confirm" data-testid="sub-confirm"> I\u2019ve checked these warnings and want to export anyway</label>`:""}
+</div><footer class="merge-foot"><button class="btn" data-action="close-modal">Back</button><button class="btn primary" data-action="submission-export-do" data-testid="submission-export-do" ${(!sum.hasForms&&!sum.hasEvidence)?"disabled":""}>Download submission pack (.zip)</button></footer></div>`;}}
 if(ui.fillTpl){const p=active();return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog"><header><h2>Fill a copy</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><p class="small muted">Creates a filled copy of <b>${esc(ui.fillTpl.fileName)}</b> (candidate name, date, and for Plan/Feedback forms, activity details). The stored blank is never changed.</p><div class="field"><label>Signature (only if you choose it — never added automatically)</label>${S.profile.signatureBlobId?`<button type="button" class="esign-btn ${ui.fillSig?"on":""}" data-action="fill-esign" data-testid="fill-esign" aria-pressed="${ui.fillSig}"><span class="esign-circle">${ui.fillSig?"✓":""}</span> Add e-signature ${ui.fillSig?"— added":""}</button><p class="tiny muted">Inserts your Profile signature into this copy. Not a legal e-signature service — MTCS may still require ink / scanned sign-off.</p>`:`<p class="small muted">No signature saved yet. <a href="#/profile" data-action="close-modal">Draw or upload one in More → Profile</a>, then come back.</p>`}</div>${p?`<div class="field"><label>Activity</label><select id="fill-act">${p.activities.map(a=>`<option value="${a.id}" ${String(ui.formsAct||workActId(p))===String(a.id)?"selected":""}>Activity ${a.n} — ${esc(a.title)}</option>`).join("")}</select></div>`:`<p class="small">Open a portfolio first.</p>`}</div><footer><button class="btn primary" data-action="do-fill">Download filled copy</button></footer></div>`;}
 return "";}
 function critNavInfo(){const list=ui.critNavList&&ui.critNavList.length?ui.critNavList:CRITS.map(k=>k.id);const idx=list.indexOf(ui.drawerCrit);return{list,idx};}
@@ -324,6 +345,7 @@ packs.forEach(k=>{const prev=S.packImports.find(i=>i.packKey===k);refreshPackImp
 function blobIsReferenced(blobId,ignoreTemplateId){if(!blobId)return false;
 if(S.templates.some(x=>x.blobId===blobId&&x.id!==ignoreTemplateId))return true;
 if(S.portfolios.some(pf=>(pf.evidence||[]).some(e=>e.blobId===blobId)))return true;
+if(S.portfolios.some(pf=>(pf.activities||[]).some(a=>a.assessorSig&&a.assessorSig.blobId===blobId)))return true;
 if(S.shared.some(x=>(x.evidenceBlobs||[]).includes(blobId)||(x.evidence||[]).some(e=>e.blobId===blobId)))return true;
 return false;}
 function refreshPackImport(k,zipName,importedAt){const count=S.templates.filter(x=>x.packKey===k).length;S.packImports=S.packImports.filter(i=>i.packKey!==k);if(count)S.packImports.push({packKey:k,zipName:zipName||"",fileCount:count,importedAt:importedAt||new Date().toISOString()});}
@@ -331,7 +353,7 @@ function refreshPackImport(k,zipName,importedAt){const count=S.templates.filter(
    Orphaned duplicate blobs are deleted only when nothing else references them. */
 function migrateLegacyPortfolios(){let changed=false;S.portfolios.forEach(pf=>{
 if(pf.genPackId&&!(S.genPacks||[]).some(g=>g.id===pf.genPackId)){pf.genPackId=null;changed=true;}
-(pf.activities||[]).forEach(a=>{if(!Array.isArray(a.planCritIds)){a.planCritIds=Object.keys(pf.criteria||{}).filter(cid=>{const c=(pf.criteria[cid]||{})[a.id];return c&&c.status!=="Gap";});changed=true;}});
+(pf.activities||[]).forEach(a=>{if(!("assessorSig" in a)){a.assessorSig=null;changed=true;}if(!("candidateSignedAt" in a)){a.candidateSignedAt=null;changed=true;}if(!Array.isArray(a.sigAudit)){a.sigAudit=[];changed=true;}if(!Array.isArray(a.planCritIds)){a.planCritIds=Object.keys(pf.criteria||{}).filter(cid=>{const c=(pf.criteria[cid]||{})[a.id];return c&&c.status!=="Gap";});changed=true;}});
 });if(changed)save();}
 async function cleanupPackData(){let changed=false;
 const byKey=new Map();
@@ -395,7 +417,7 @@ const zip=new JSZip(),fileEntries=[];for(const e of ev){const blob=await blobGet
 const manifest={kind,appVersion:APP_VERSION,portfolioId:p.id,activityId:a.id,candidate:p.name,candidateName:p.name,route:p.routeLabel,exportSeq:a.exportSeq+(kind==="activity-export"?1:0),baseVersion:a.version,exportedAt:new Date().toISOString(),files:fileEntries};
 zip.file("manifest.json",JSON.stringify(manifest,null,2));zip.file("activity.json",JSON.stringify({activity:a,criteria:crit,genPack:genPackOf(p),evidence:ev.map(e=>{const{blobId,...rest}=e;return rest;})},null,2));return{zip,manifest};}
 async function exportBackup(){const zip=new JSZip(),files=[];zip.file("data.json",JSON.stringify({portfolios:S.portfolios,templates:S.templates,packImports:S.packImports,shared:S.shared,genPacks:S.genPacks,profile:S.profile,settings:S.settings},null,2));
-const bids=new Set();S.portfolios.forEach(p=>p.evidence.forEach(e=>bids.add(e.blobId)));S.templates.forEach(t=>bids.add(t.blobId));S.shared.forEach(x=>(x.evidenceBlobs||[]).forEach(b=>bids.add(b)));if(S.profile&&S.profile.signatureBlobId)bids.add(S.profile.signatureBlobId);
+const bids=new Set();S.portfolios.forEach(p=>{p.evidence.forEach(e=>bids.add(e.blobId));(p.activities||[]).forEach(a=>{if(a.assessorSig&&a.assessorSig.blobId)bids.add(a.assessorSig.blobId);});});S.templates.forEach(t=>bids.add(t.blobId));S.shared.forEach(x=>(x.evidenceBlobs||[]).forEach(b=>bids.add(b)));if(S.profile&&S.profile.signatureBlobId)bids.add(S.profile.signatureBlobId);
 for(const bid of bids){const blob=await blobGet(bid);if(!blob)continue;const path="blobs/"+bid;zip.file(path,blob);files.push({path,blobId:bid,sha256:await sha256(blob),size:blob.size});}
 zip.file("manifest.json",JSON.stringify({kind:"mtcs-full-backup",schema:1,appVersion:APP_VERSION,exportedAt:new Date().toISOString(),files},null,2));
 await exportZip(zip,"MTCS_Tracker_Backup_"+todayISO()+".zip");S.settings.lastBackupAt=new Date().toISOString();save();try{await kvSet("settings",S.settings);}catch(_){}toast("Backup downloaded. Keep it somewhere safe.");}
@@ -420,7 +442,8 @@ const a=r.activity;a.versions=a.versions||[];a.versions.push({version:a.version,
 Object.keys(p.criteria).forEach(cid=>{delete p.criteria[cid][a.id];});Object.entries(r.payload.criteria||{}).forEach(([cid,cv])=>{p.criteria[cid]=p.criteria[cid]||{};p.criteria[cid][a.id]=cv;});
 for(const e of r.payload.evidence||[]){const en=(r.manifest.files||[]).find(f=>f.id===e.id);if(!en||!r.zip.file(en.path))continue;const blob=await r.zip.file(en.path).async("blob");const ex=p.evidence.find(x=>x.id===e.id);if(ex){await blobSet(ex.blobId,blob);Object.assign(ex,e,{blobId:ex.blobId});}else{const blobId=uid("blob");await blobSet(blobId,blob);p.evidence.push(Object.assign({},e,{blobId}));}}
 if(a.signedOn)a.status="Signed";save();ui.pendingReturn=null;toast("Return applied as v"+a.version+". Previous version kept for rollback.");render();}
-function initSigPad(){const c=document.getElementById("sig-pad");if(!c||c.dataset.init)return;c.dataset.init="1";const ctx=c.getContext("2d");ctx.lineWidth=2.4;ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle="#14324a";let drawing=false,last=null;
+function initSigPad(){["sig-pad","assessor-sig-pad"].forEach(id=>initOnePad(document.getElementById(id)));}
+function initOnePad(c){if(!c||c.dataset.init)return;c.dataset.init="1";const ctx=c.getContext("2d");ctx.lineWidth=2.4;ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle="#14324a";let drawing=false,last=null;
 const pos=e=>{const r=c.getBoundingClientRect();return{x:(e.clientX-r.left)*(c.width/r.width),y:(e.clientY-r.top)*(c.height/r.height)};};
 c.addEventListener("pointerdown",e=>{drawing=true;last=pos(e);try{c.setPointerCapture(e.pointerId);}catch(_){}e.preventDefault();});
 c.addEventListener("pointermove",e=>{if(!drawing)return;const pt=pos(e);ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(pt.x,pt.y);ctx.stroke();last=pt;c.dataset.dirty="1";});
@@ -433,6 +456,177 @@ return `<section class="card" id="profile" data-testid="profile-card"><div class
 ${hasSig&&!ui.sigPadOpen?`${ui.sigUrl?`<img src="${ui.sigUrl}" alt="Your saved signature" class="sig-preview" data-testid="sig-preview">`:`<p class="small">✓ Signature saved</p>`}<p class="tiny muted">Saved ${S.profile.signatureUpdatedAt?fmtDate(S.profile.signatureUpdatedAt):""}</p><div class="btn-row"><button class="btn" data-action="sig-replace" data-testid="sig-replace">Replace — draw again</button>${uploadBtn}<button class="btn ghost" data-action="sig-clear" data-testid="sig-clear">Clear</button></div>`
 :`<canvas id="sig-pad" class="sig-pad" width="640" height="240" data-testid="sig-pad"></canvas><div class="btn-row"><button class="btn primary" data-action="sig-save" data-testid="sig-save">Save signature</button>${uploadBtn}${hasSig?`<button class="btn" data-action="sig-cancel-pad">Cancel</button>`:""}</div><p class="tiny muted">Or upload a PNG/JPG photo or scan of your ink signature — it is placed on a white background and stored on this device like a drawn one.</p>`}
 </section>`;}
+/* ---- v0.2.3 submission pack: filled forms, signatures, preview ---- */
+function submissionFormsPlan(p,scopeActId){
+  const acts=scopeActId?p.activities.filter(a=>String(a.id)===String(scopeActId)):p.activities;
+  const out=[]; const seenSignOff=new Set();
+  const findAll=rx=>S.templates.filter(x=>rx.test(x.fileName));
+  acts.forEach(a=>{
+    findAll(/AssessmentPlan/i).forEach(tpl=>out.push({tpl,act:a,kind:"Assessment Plan"}));
+    planCritOf(p,a).forEach(k=>{});
+    // competence + UKQ per competence in plan
+    const compNums=new Map();
+    COMPS.forEach(c=>{if(c.criteria.some(k=>(a.planCritIds||[]).includes(k.id)||cov(p,k.id,a.id).status!=="Gap"))compNums.set(c.fileName||c.id,c);});
+    compNums.forEach(c=>{
+      const tpl=c.fileName?S.templates.find(x=>x.fileName===c.fileName):null;
+      if(tpl)out.push({tpl,act:a,kind:"Competence "+(c.number||""),comp:c});
+      const ukqNum=String(c.number||"").padStart(2,"0");
+      const hasUkq=(a.ukq||[]).some(u=>u.q||u.a);
+      if(hasUkq){const ut=S.templates.find(x=>new RegExp("UKQ"+ukqNum+"\\.pdf$","i").test(x.fileName)&&(c.fileName?x.packKey===tpl?.packKey||true:true)); if(ut&&!out.some(o=>o.tpl.id===ut.id&&o.act.id===a.id))out.push({tpl:ut,act:a,kind:"UKQ "+ukqNum,comp:c});}
+    });
+    findAll(/FeedbackForm/i).forEach(tpl=>out.push({tpl,act:a,kind:"Feedback"}));
+    findAll(/CandidateTestimony/i).forEach(tpl=>out.push({tpl,act:a,kind:"Candidate Testimony"}));
+    if(a.witness)findAll(/Record_of_Witness/i).forEach(tpl=>out.push({tpl,act:a,kind:"Record of Witness"}));
+  });
+  findAll(/Assessor_SignOff/i).forEach(tpl=>{if(!seenSignOff.has(tpl.id)){seenSignOff.add(tpl.id);out.push({tpl,act:acts[0]||null,kind:"Assessor Sign-Off"});}});
+  const seen=new Set(); return out.filter(o=>{const k=(o.act?o.act.id:"-")+"|"+o.kind+"|"+o.tpl.fileName; if(seen.has(k))return false; seen.add(k); if(o.act&&(o.act.planCritIds||[]).length&&/Assessment Plan|Feedback|Competence|UKQ/.test(o.kind)&&!critsForForm(p,o.act,o.tpl,o.kind).length)return false; return true;});
+}
+function evidenceZipPath(p,e,used){
+  const a=p.activities.find(x=>String(x.id)===String(e.activityId));
+  const folder=a?("Activity-"+a.n+"_"+safeName(a.title)):"Unassigned";
+  const codes=(e.criteria||[]).join("-")||"UNMAPPED";
+  let name="A"+(a?a.n:"0")+"_"+codes+"_"+safeName(e.fileName);
+  // keep extension
+  const ext=(e.fileName.match(/\.[^.]+$/)||[""])[0];
+  if(ext&&!name.toLowerCase().endsWith(ext.toLowerCase()))name+=ext;
+  let path="02-Evidence/"+folder+"/"+name, i=2;
+  while(used.has(path)){path="02-Evidence/"+folder+"/"+name.replace(/(\.[^.]+)?$/,m=>"_"+(i++)+(m||"")); }
+  used.add(path); return path;
+}
+function critsForForm(p,a,tpl,kind){
+  const all=a?planCritOf(p,a):CRITS; if(!a||!tpl)return all;
+  const isCore=/Core/i.test(tpl.fileName||"")||/core/i.test(tpl.packKey||"");
+  const isRoleForm=/AssessmentPlan|FeedbackForm|Competence|UKQ/i.test(tpl.fileName||"")&&!/Core/i.test(tpl.fileName||"");
+  if(isCore)return all.filter(k=>k.comp&&k.comp.unitId==="core");
+  if(isRoleForm)return all.filter(k=>!k.comp||k.comp.unitId!=="core");
+  return all;
+}
+function buildSubmissionSummary(p,scopeActId){
+  const acts=scopeActId?p.activities.filter(a=>String(a.id)===String(scopeActId)):p.activities;
+  const forms=submissionFormsPlan(p,scopeActId);
+  const used=new Set(); const evEntries=[];
+  const evList=scopeActId?p.evidence.filter(e=>String(e.activityId)===String(scopeActId)):p.evidence;
+  evList.forEach(e=>{const a=p.activities.find(x=>String(x.id)===String(e.activityId));evEntries.push({e,a,path:evidenceZipPath(p,e,used),statuses:(e.criteria||[]).map(cid=>{const cv=a?cov(p,cid,a.id):{status:"Gap",code:""};return cid+":"+cv.status+(cv.code?"/"+cv.code:"");}).join("; ")});});
+  const warnings=[];
+  if(!p.name)warnings.push("Candidate name is blank.");
+  acts.forEach(a=>{
+    if(!planCritOf(p,a).length)warnings.push("Activity "+a.n+": no criteria chosen in its Assessment Plan.");
+    if(!a.assessorSig)warnings.push("Activity "+a.n+": no assessor signature captured.");
+    if(!a.candidateSignedAt)warnings.push("Activity "+a.n+": candidate has not signed this activity (Profile signature will not be applied).");
+    if(!(a.assessorName||p.assessedBy))warnings.push("Activity "+a.n+": no assessor name (activity or portfolio Assessed by).");
+  });
+  const unmapped=evList.filter(e=>!e.criteria.length);
+  if(unmapped.length)warnings.push(unmapped.length+" evidence file(s) not linked to any criterion (labelled UNMAPPED in the pack).");
+  if(!S.templates.length)warnings.push("No blank MTCS forms stored in this browser — pack will contain evidence and index only.");
+  if(!evList.length)warnings.push("No evidence files in scope.");
+  if(CRITS.length&&CRITS.some(k=>critOverall(p,k.id)==="Gap"))warnings.push(CRITS.filter(k=>critOverall(p,k.id)==="Gap").length+" criteria are still Gap overall.");
+  const root=safeName(p.name+"_"+p.routeLabel);
+  return {acts,forms,evEntries,warnings,root,hasForms:forms.length>0,hasEvidence:evList.length>0};
+}
+async function tryPlaceSig(pdf,form,blobId,who,name,dateStr,log){
+  try{
+    const blob=await blobGet(blobId); if(!blob)return false;
+    const png=await pdf.embedPng(await blob.arrayBuffer());
+    const fields=form?form.getFields():[];
+    const specific=who==="candidate"?/candidate signature/i:/assessor signature/i;
+    const sf=fields.find(f=>specific.test(f.getName())&&f.acroField&&f.acroField.getWidgets().length)||fields.find(f=>/signature/i.test(f.getName())&&f.acroField&&f.acroField.getWidgets().length);
+    if(sf){const w=sf.acroField.getWidgets()[0];const rect=w.getRectangle();const page=pdf.getPages().find(pg=>pg.ref===w.P());if(page&&rect&&rect.width>10){page.drawImage(png,{x:rect.x,y:rect.y,width:Math.min(rect.width,180),height:Math.min(rect.height,Math.min(rect.width,180)*(png.height/png.width))});log.push(who+" signature image placed at form field '"+sf.getName()+"'.");return true;}}
+  }catch(e){log.push(who+" signature placement failed: "+e.message);}
+  return false;
+}
+async function fillFormForSubmission(entry,p){
+  const {tpl,act:a,kind}=entry; const filled=[],appended=[],warn=[];
+  const blob=await blobGet(tpl.blobId); if(!blob)throw new Error("Stored blank missing: "+tpl.fileName);
+  const pdf=await PDFLib.PDFDocument.load(await blob.arrayBuffer()); let form=null; try{form=pdf.getForm();}catch(_){}
+  const set=(n,v)=>{if(v==null||v==="")return; if(!form)return; try{form.getTextField(n).setText(String(v)); if(!filled.includes(n))filled.push(n);}catch(_){}};
+  const cand=(p.name||"").toUpperCase(), assessor=((a&&a.assessorName)||p.assessedBy||"").toUpperCase();
+  const crits=critsForForm(p,a,tpl,kind);
+  const critCodes=crits.map(k=>k.id).join(", ");
+  const types=[...new Set(crits.map(k=>a?cov(p,k.id,a.id).code:"").filter(Boolean).map(c=>CODE_LABEL[c]||c))].join(", ");
+  set("Candidate Name",cand); set("Candidate name",cand); set("Date",todayISO()); set("Date_2",todayISO()); set("Date_3",todayISO());
+  set("Grade",p.routeLabel); set("Assessor Name",assessor); set("Assessor name",assessor);
+  if(a){
+    set("Activity Number 12 or 3",a.n);
+    set("Work activity to be assessed",a.summary||a.title);
+    set("Which performance criteria in the competences do you intend to assess",critCodes);
+    set("What type of evidence will be assessed Observation Work Product Questioning or other please specify",types||a.planText||"");
+    set("What date or dates will the assessment take place",a.dates); set("Where will the assessment take place eg name of vessel installation system workshop etc",a.where);
+    set("Witness name if applicable",a.witness); set("Witness name If applicable in assessment plan",a.witness); set("Particular assessment needs and name of any witness involved",a.witness||a.planText||"");
+    set("Please specify the reasons for your decision",a.feedbackText); set("Summary of further action for the candidate",a.feedbackText?"See assessor feedback / next activity plan.":"");
+    set("Candidates comments",a.candidateComments); set("Candidate StatementRow1",a.candidateComments||a.summary||""); set("Description of TaskRow1",a.summary||a.title);
+    set("Competencies",critCodes); set("Location of Activity",a.where); set("AssessorWitness",a.witness||assessor); set("Feedback completed by AssessorWitnessRow1",a.feedbackText||"");
+    if(/Feedback/i.test(kind)){
+      const entries=crits.map(k=>cov(p,k.id,a.id)); const allSigned=entries.length&&entries.every(c=>c.status==="Signed");
+      set("Has the candidate demonstrated competence in this activity  yesno",entries.length?(allSigned?"Yes":"No"):"");
+      const allActsDone=p.activities.every(x=>planCritOf(p,x).length&&planCritOf(p,x).every(k=>cov(p,k.id,x.id).status==="Signed"));
+      set("Has the candidate now demonstrated competence in three activities yesno",allActsDone?"Yes":"No");
+    }
+    if(entry.comp){
+      // Competence sheet: Type of Evidence fields in form order map to criteria in order
+      try{const tof=(form?form.getFields():[]).filter(f=>/^Type of Evidence/i.test(f.getName())); entry.comp.criteria.forEach((k,i)=>{const cv=cov(p,k.id,a.id); const f=tof[i]; if(f&&cv.code){try{f.setText(cv.code); filled.push(k.id+" evidence code ("+cv.code+")");}catch(_){}} else if(cv.status!=="Gap"){/* status listed on appended criteria sheet */}});}catch(e){warn.push("Competence code fill: "+e.message);}
+    }
+    if(/^UKQ/i.test(kind)){
+      (a.ukq||[]).slice(0,10).forEach((u,i)=>{if(u.q||u.a)set(String(i+1),(u.q?u.q+" — ":"")+(u.a||"")); if(u.ok)set("Satisfactory Response"+(i+1),u.ok);});
+      set("Feedback on answers received",a.feedbackText||"");
+    }
+  }
+  // signatures: only when explicitly signed
+  let candPlaced=false, assPlaced=false;
+  const includeCand=!!(a&&a.candidateSignedAt&&S.profile.signatureBlobId);
+  const includeAss=!!(a&&a.assessorSig&&a.assessorSig.blobId);
+  if(includeCand)candPlaced=await tryPlaceSig(pdf,form,S.profile.signatureBlobId,"candidate",cand,todayISO(),filled);
+  if(includeAss)assPlaced=await tryPlaceSig(pdf,form,a.assessorSig.blobId,"assessor",assessor,todayISO(),filled);
+  const needCriteriaSheet=/Assessment Plan|Competence/i.test(kind);
+  if(needCriteriaSheet|| (includeCand&&!candPlaced) || (includeAss&&!assPlaced)){
+    const page=pdf.addPage(); const {height}=page.getSize(); let y=height-40;
+    const line=(t,size)=>{const str=String(t); const chunks=[]; for(let i=0;i<str.length;i+=95)chunks.push(str.slice(i,i+95)); chunks.forEach(c=>{if(y<50){} page.drawText(c,{x:40,y,size:size||9}); y-=13;});};
+    line("Criteria covered — Activity "+(a?a.n:"")+" (appended by MTCS Tracker Beta v"+APP_VERSION+")",11);
+    line("Candidate: "+cand+"  Route: "+p.routeLabel+"  Date: "+todayISO(),9);
+    if(a)line("Activity: "+(a.title||"")+"  Dates: "+(a.dates||"")+"  Where: "+(a.where||""),9);
+    y-=6;
+    crits.forEach(k=>{const cv=a?cov(p,k.id,a.id):{status:"",code:""}; line(k.id+" ["+(cv.status||"")+(cv.code?" / "+cv.code:"")+"] "+k.text,8.5);});
+    y-=6; line(SIG_NOTE,8.5);
+    const embedSig=async(blobId,label,name,placed)=>{
+      if(placed)return; try{const b=await blobGet(blobId); if(!b)return; const png=await pdf.embedPng(await b.arrayBuffer()); const w=Math.min(260,png.width, page.getSize().width-80); const h=w*(png.height/png.width); y-=h+18; page.drawText(label+": "+name+"  "+todayISO(),{x:40,y:y+h+4,size:9}); page.drawImage(png,{x:40,y,width:w,height:Math.min(h,120)}); appended.push(label+" image on appended sheet.");}catch(e){warn.push(label+" sig append: "+e.message);}
+    };
+    if(includeCand)await embedSig(S.profile.signatureBlobId,"Candidate signature",cand,candPlaced);
+    if(includeAss&&a)await embedSig(a.assessorSig.blobId,"Assessor signature",assessor,assPlaced);
+    if(needCriteriaSheet)appended.push("Criteria covered — Activity "+(a?a.n:"")+" sheet with full criterion wording (form field holds codes; full text appended for readability).");
+  }
+  try{if(form)form.updateFieldAppearances();}catch(_){}
+  return {blob:new Blob([await pdf.save()],{type:"application/pdf"}),filled,appended,warnings:warn};
+}
+async function buildSubmissionPack(p,scopeActId){
+  const sum=buildSubmissionSummary(p,scopeActId);
+  const zip=new JSZip(); const root=sum.root; const fillLog=[]; const manifestRows=[];
+  const used=new Set();
+  // forms
+  for(const entry of sum.forms){
+    try{
+      const r=await fillFormForSubmission(entry,p);
+      const a=entry.act; const folder=root+"/01-Forms/"+(a?("Activity-"+a.n):"Portfolio");
+      const fname=(a?("A"+a.n+"_"):"")+safeName(entry.kind)+"_"+safeName(entry.tpl.fileName);
+      zip.file(folder+"/"+fname,r.blob);
+      fillLog.push(entry.tpl.fileName+" (Activity "+(a?a.n:"-")+", "+entry.kind+"): FILLED fields ["+r.filled.join("; ")+"]"+(r.appended.length?" APPENDED ["+r.appended.join("; ")+"]":"")+(r.warnings.length?" WARNINGS ["+r.warnings.join("; ")+"]":""));
+      manifestRows.push({path:folder+"/"+fname,activity:a?("Activity "+a.n):"Portfolio",criteria:a?planCritOf(p,a).map(k=>k.id).join(" "):"",evidenceCode:"form",status:entry.kind});
+    }catch(e){fillLog.push(entry.tpl.fileName+": FAILED to fill ("+e.message+") — blank not included; re-import the forms pack.");}
+  }
+  // evidence
+  for(const {e,a,path,statuses} of sum.evEntries){
+    const blob=await blobGet(e.blobId); if(!blob){fillLog.push("Evidence missing blob: "+e.fileName); continue;}
+    const full=root+"/"+path; zip.file(full,blob);
+    manifestRows.push({path:full,activity:a?("Activity "+a.n):"Unassigned",criteria:(e.criteria||[]).join(" "),evidenceCode:statuses||"UNMAPPED",status:e.redact?"check client data":""});
+  }
+  const csv=["path,activity,criteria,evidence code / status,note",...manifestRows.map(r=>[r.path,r.activity,r.criteria,r.evidenceCode,r.status].map(csvCell).join(","))].join("\n");
+  const htmlIndex="<!doctype html><meta charset=utf-8><title>Submission index</title><h1>"+esc(p.name)+" — "+esc(p.routeLabel)+"</h1><p>Generated by MTCS Tracker Beta v"+APP_VERSION+" on "+todayISO()+". Download-only pack — not submitted by the app.</p><table border=1 cellspacing=0 cellpadding=4><tr><th>File</th><th>Activity</th><th>Criteria</th><th>Code / status</th></tr>"+manifestRows.map(r=>"<tr><td>"+esc(r.path)+"</td><td>"+esc(r.activity)+"</td><td>"+esc(r.criteria)+"</td><td>"+esc(r.evidenceCode)+"</td></tr>").join("")+"</table><h2>Warnings</h2><ul>"+sum.warnings.map(w=>"<li>"+esc(w)+"</li>").join("")+"</ul>";
+  zip.file(root+"/00-Index/index.html",htmlIndex);
+  zip.file(root+"/00-Index/manifest.csv",csv);
+  zip.file(root+"/00-Index/manifest.json",JSON.stringify({kind:"mtcs-submission-pack",appVersion:APP_VERSION,portfolio:p.name,route:p.routeLabel,exportedAt:new Date().toISOString(),warnings:sum.warnings,files:manifestRows},null,2));
+  zip.file(root+"/00-Index/fill-log.txt",fillLog.join("\n")||"No forms filled.");
+  zip.file(root+"/00-Index/README.txt","MTCS submission pack (download only — the app has NOT submitted this to MTCS or emailed anyone).\nFolders: 01-Forms = filled copies (stored blanks unchanged); 02-Evidence = labelled evidence; 00-Index = index/manifest/fill log.\n"+SIG_NOTE+"\nNames on forms are in block capitals; check ink-signature requirements with MTCS before sending.\nWarnings:\n- "+sum.warnings.join("\n- "));
+  return {zip,sum,root};
+}
+
 async function fillTemplate(tplId){const t=S.templates.find(x=>x.id===tplId),p=active();if(!t)return;const blob=await blobGet(t.blobId);if(!blob){toast("Template missing from this browser.");return;}
 const sel=document.getElementById("fill-act"),a=p&&sel?actOf(p,sel.value):null;
 try{const pdf=await PDFLib.PDFDocument.load(await blob.arrayBuffer()),form=pdf.getForm();const set=(n,v)=>{if(!v)return;try{form.getTextField(n).setText(String(v));}catch(_){}};
@@ -517,6 +711,13 @@ else if(a==="open-template"){const t=S.templates.find(x=>x.id===el.dataset.id),b
 else if(a==="fill-template"){ui.fillTpl=S.templates.find(x=>x.id===el.dataset.id);ui.fillSig=false;render();}
 else if(a==="do-fill"){await fillTemplate(ui.fillTpl.id);}
 else if(a==="fill-esign"){ui.fillSig=!ui.fillSig;render();}
+else if(a==="submission-preview-open"&&p){ui.subScope=el.dataset.act||null;ui.modal="submission-preview";render();}
+else if(a==="submission-export"&&p){const sc=el.dataset.act||null;const sum0=buildSubmissionSummary(p,sc);if(sum0.warnings.length){ui.subScope=sc;ui.modal="submission-preview";toast("Check the preview warnings before exporting.");render();}else{ui.subScope=sc;const r=await buildSubmissionPack(p,sc);await exportZip(r.zip,"MTCS_Submission_"+safeName(p.name)+".zip");ui.modal=null;toast("Submission pack downloaded \u2014 send it to MTCS yourself; the app has not submitted anything.");render();}}
+else if(a==="submission-export-do"&&p){const sum1=buildSubmissionSummary(p,ui.subScope);if(sum1.warnings.length&&!(document.getElementById("sub-confirm")||{}).checked){toast("Tick \u2018I\u2019ve checked these warnings\u2019 first.");return;}const r=await buildSubmissionPack(p,ui.subScope);await exportZip(r.zip,"MTCS_Submission_"+safeName(p.name)+".zip");ui.modal=null;toast("Submission pack downloaded \u2014 send it to MTCS yourself; the app has not submitted anything.");render();}
+else if(a==="candidate-sign"&&p){const act=actOf(p,el.dataset.act);if(act&&S.profile.signatureBlobId){act.candidateSignedAt=new Date().toISOString();act.sigAudit=act.sigAudit||[];act.sigAudit.push({who:"candidate",name:p.name,at:act.candidateSignedAt,source:"profile"});save();toast("You signed Activity "+act.n+" \u2014 your Profile signature will be applied to its paperwork on export.");render();}}
+else if(a==="candidate-unsign"&&p){const act=actOf(p,el.dataset.act);if(act){act.candidateSignedAt=null;save();toast("Candidate signature removed from this activity.");render();}}
+else if(a==="assessor-sign-open"&&p){ui.assessorSignAct=el.dataset.act;ui.modal="assessor-sign";render();}
+else if(a==="assessor-sign-save"&&p){const act=actOf(p,el.dataset.act);const c=document.getElementById("assessor-sig-pad");const nameEl=document.getElementById("assessor-sig-name");if(!act)return;if(!c||!c.dataset.dirty){toast("Draw the assessor signature first, or upload an image.");return;}const blob=await new Promise(r=>c.toBlob(r,"image/png"));if(!blob){toast("Could not save that drawing.");return;}const bid=uid("asig");await blobSet(bid,blob);if(act.assessorSig&&act.assessorSig.blobId){try{await blobDel(act.assessorSig.blobId);}catch(_){}}act.assessorSig={name:nameEl?nameEl.value.trim():"",blobId:bid,signedAt:new Date().toISOString(),source:"drawn"};if(nameEl&&nameEl.value.trim())act.assessorName=nameEl.value.trim();act.sigAudit=act.sigAudit||[];act.sigAudit.push({who:"assessor",name:act.assessorSig.name,at:act.assessorSig.signedAt,activity:act.id});ui.modal=null;save();toast("Assessor signed Activity "+act.n+" \u2014 signature will be applied to its paperwork on export.");render();}
 else if(a==="sig-replace"){ui.sigPadOpen=true;render();}
 else if(a==="sig-cancel-pad"){ui.sigPadOpen=false;render();}
 else if(a==="sig-clear"){if(confirm("Clear your saved signature from this device? Forms already downloaded keep theirs.")){const old=S.profile.signatureBlobId;S.profile.signatureBlobId=null;S.profile.signatureUpdatedAt=null;ui.sigUrl=null;ui.sigPadOpen=true;if(old&&!blobIsReferenced(old,null)){try{await blobDel(old);}catch(_){}}save();toast("Signature cleared.");render();}}
@@ -561,6 +762,7 @@ if(el.dataset.upload==="evidence"&&p){const added=await addEvidenceFiles(p,files
 else if((el.dataset.upload==="capture-file"||el.dataset.upload==="capture-photo")&&p){const added=await addEvidenceFiles(p,files,ui.captureAct||workActId(p));ui.captureBatch=added.map(x=>x.id);ui.captureLinks={};added.forEach(x=>ui.captureLinks[x.id]=suggestCriteria(x.fileName));ui.modal="link-sheet";}
 else if(el.dataset.upload==="evidence-for-crit"&&p){const added=await addEvidenceFiles(p,files,el.dataset.act||"");added.forEach(x=>{x.criteria=[...new Set([...x.criteria,el.dataset.crit])];});save();toast(added.length+" file(s) saved on device and linked to "+el.dataset.crit+".");}
 else if(el.dataset.upload==="pack"){for(const f of files)await importPackZip(f,el.dataset.packKey||undefined);maybeShowGenReview();}
+else if(el.dataset.upload==="assessor-signature"&&p){const f=files[0];const act=actOf(p,el.dataset.act||ui.assessorSignAct);if(!act)throw new Error("No activity for assessor signature.");const bmp=await createImageBitmap(f);const scale=Math.min(1,1200/Math.max(bmp.width,bmp.height));const cv=document.createElement("canvas");cv.width=Math.max(1,Math.round(bmp.width*scale));cv.height=Math.max(1,Math.round(bmp.height*scale));const cx=cv.getContext("2d");cx.fillStyle="#ffffff";cx.fillRect(0,0,cv.width,cv.height);cx.drawImage(bmp,0,0,cv.width,cv.height);const blob=await new Promise(r=>cv.toBlob(r,"image/png"));if(!blob)throw new Error("Could not read that image.");const nameEl=document.getElementById("assessor-sig-name");const bid=uid("asig");await blobSet(bid,blob);if(act.assessorSig&&act.assessorSig.blobId){try{await blobDel(act.assessorSig.blobId);}catch(_){}}act.assessorSig={name:nameEl?nameEl.value.trim():(act.assessorName||p.assessedBy||""),blobId:bid,signedAt:new Date().toISOString(),source:"uploaded"};if(act.assessorSig.name)act.assessorName=act.assessorSig.name;act.sigAudit=act.sigAudit||[];act.sigAudit.push({who:"assessor",name:act.assessorSig.name,at:act.assessorSig.signedAt,activity:act.id});ui.modal=null;save();toast("Assessor signature uploaded and applied to Activity "+act.n+".");}
 else if(el.dataset.upload==="signature"){const f=files[0];const bmp=await createImageBitmap(f);const scale=Math.min(1,1200/Math.max(bmp.width,bmp.height));const cv=document.createElement("canvas");cv.width=Math.max(1,Math.round(bmp.width*scale));cv.height=Math.max(1,Math.round(bmp.height*scale));const cx=cv.getContext("2d");cx.fillStyle="#ffffff";cx.fillRect(0,0,cv.width,cv.height);cx.drawImage(bmp,0,0,cv.width,cv.height);const blob=await new Promise(r=>cv.toBlob(r,"image/png"));if(!blob)throw new Error("Could not read that image.");const old=S.profile.signatureBlobId,newId=uid("sig");await blobSet(newId,blob);S.profile.signatureBlobId=newId;S.profile.signatureUpdatedAt=new Date().toISOString();if(old&&old!==newId){try{await blobDel(old);}catch(_){}}if(ui.sigUrl)URL.revokeObjectURL(ui.sigUrl);ui.sigUrl=URL.createObjectURL(blob);ui.sigPadOpen=false;save();toast("Signature image saved on this device.");}
 else if(el.dataset.upload==="backup")ui.pendingBackup=await parseBackup(files[0]);
 else if(el.dataset.upload==="shared")await importSharedZip(files[0]);
