@@ -1,7 +1,7 @@
 {
   "name": "MTCS Tracker",
   "short_name": "MTCS Tracker",
-  "description": "Local-first MTCS competence portfolio tracker. Data stays in your browser; back up regularly.",
+  "description": "Beta v0.2.1 — local-first MTCS competence portfolio tracker. Data stays in your browser; back up regularly. Not a full release.",
   "id": "./",
   "start_url": "./?source=pwa",
   "scope": "./",

@@ -91,7 +91,7 @@ main{padding:24px 28px 60px;min-width:0}
 .ring::after{content:attr(data-label);width:88px;height:88px;border-radius:50%;background:#fff;display:grid;place-items:center;font-weight:700;font-size:.9rem;text-align:center;white-space:pre-line;line-height:1.25}
 .meter{position:relative;height:16px;border-radius:99px;background:linear-gradient(90deg,var(--brand) 0 var(--d),#9ab6c4 var(--d) 100%)}
 .meter .mark{position:absolute;left:70%;top:-6px;bottom:-6px;width:2px;background:var(--ink)}
-.meter .mark::after{content:"70% minimum";position:absolute;top:-18px;left:-34px;font-size:.7rem;white-space:nowrap;color:var(--ink)}
+
 
 /* Lists */
 .list{list-style:none;margin:0;padding:0}
@@ -563,3 +563,14 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .esign-btn.on .esign-circle{background:#1d9d63;border-color:#1d9d63}
 .gen-comp{border:1px solid var(--line,#d7e0e6);border-radius:10px;padding:8px 10px;margin:8px 0}
 .plan-comp-row{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line,#d7e0e6);border-radius:10px;padding:8px;margin:8px 0}
+
+/* Beta v0.2.1: home icon, Overview ring, flat plan list */
+.home-btn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;flex:none;border-radius:10px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);color:#fff;text-decoration:none;font-size:1.25rem;line-height:1}
+.beta-tag{font-size:.62rem;font-weight:700;background:#f5c542;color:#14324a;border-radius:999px;padding:2px 6px;vertical-align:middle;white-space:nowrap}
+.ring-ico{width:19px;height:19px;border-radius:50%;background:conic-gradient(var(--brand,#0f5c6e) 0 62%,#dbe4ea 62% 100%);display:inline-block;position:relative;flex:none}
+.ring-ico::after{content:"";position:absolute;inset:4.5px;border-radius:50%;background:#fff}
+.sidenav .ring-ico::after{background:#fff}
+.plan-list{display:flex;flex-direction:column}
+.plan-list-row{display:flex;gap:10px;align-items:flex-start;border:0;border-bottom:1px solid var(--line,#d7e0e6);border-radius:0;padding:10px 4px;margin:0}
+.plan-list-row input[type=checkbox]{width:22px;height:22px;flex:none;margin-top:2px;accent-color:var(--brand)}
+.plan-sticky{background:#fff;box-shadow:0 -6px 14px rgba(20,33,61,.08)}
