@@ -1,7 +1,7 @@
 /* MTCS Tracker service worker — offline app shell. Bump VERSION on each release. */
-const VERSION = "mtcs-1.2.0.0";
+const VERSION = "mtcs-2.0.0.0";
 const CACHE = "mtcs-tracker:" + VERSION;
-const SHELL = ["./","index.html","manifest.webmanifest","css/styles.css","js/app.js","js/packs.generated.js","js/vendor/jszip.min.js","js/vendor/pdf-lib.min.js","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-192.png","icons/icon-maskable-512.png","icons/apple-touch-icon.png"];
+const SHELL = ["./","index.html","manifest.webmanifest","css/styles.css","js/app.js","js/pack-meta.js","js/parser.js","js/vendor/jszip.min.js","js/vendor/pdf-lib.min.js","js/vendor/pdf.min.js","js/vendor/pdf.worker.min.js","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-192.png","icons/icon-maskable-512.png","icons/apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil((async () => { const c = await caches.open(CACHE); await c.addAll(SHELL.map(u => new Request(u, { cache: "reload" }))); if (!self.registration.active) await self.skipWaiting(); })()); });
 self.addEventListener("activate", e => { e.waitUntil((async () => { const keys = await caches.keys(); await Promise.all(keys.filter(k => k.startsWith("mtcs-tracker:") && k !== CACHE).map(k => caches.delete(k))); await self.clients.claim(); })()); });
 self.addEventListener("fetch", e => {
