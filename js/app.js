@@ -2,10 +2,10 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="1.1.0";
+const APP_VERSION="1.1.1";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
-const WORKER_BASE=""; // e.g. "https://mtcs-forms-fetch.<account>.workers.dev"
+const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
 const PACK=window.PACKS["g2-surveyor-2026"], TPL=window.TEMPLATES||[], MP=window.MTCS_PAGES||{};
 const COMPS=[],CRITS=[];
 PACK.units.forEach(u=>u.competences.forEach(c=>{const comp=Object.assign({},c,{unitName:u.name,unitId:u.id});COMPS.push(comp);c.criteria.forEach(k=>CRITS.push(Object.assign({},k,{comp})));}));
