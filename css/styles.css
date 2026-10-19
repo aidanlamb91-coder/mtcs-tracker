@@ -589,3 +589,19 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .sidenav .ico{display:inline-flex;align-items:center;justify-content:center}
 .send-end-card{margin-top:16px}
 .send-end-btn{min-height:52px;font-size:1rem;font-weight:700}
+
+/* Beta v0.2.4: send/preview row, sign-off selection, PDF preview */
+.send-row{display:flex;gap:10px;align-items:stretch}
+.send-row .send-preview-btn{flex:0 0 34%;justify-content:center;min-height:52px;font-size:1rem}
+.send-row .send-end-btn{flex:1;justify-content:center}
+.signoff-list{max-height:46vh;overflow:auto}
+.signoff-row{align-items:flex-start}
+.pdf-modal{width:min(760px,96vw)}
+.pdf-viewer{display:grid;grid-template-columns:190px 1fr;gap:12px;margin-top:12px}
+.pdf-thumbs{display:flex;flex-direction:column;gap:8px;max-height:62vh;overflow:auto}
+.pdf-thumb{text-align:left;border:1px solid var(--line);background:#fff;border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:4px}
+.pdf-thumb.on{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft)}
+.pdf-thumb img{width:100%;border:1px solid var(--line);border-radius:6px}
+.pdf-main{min-width:0}
+.pdf-page-img{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
+@media (max-width:640px){.pdf-viewer{grid-template-columns:1fr}.pdf-thumbs{flex-direction:row;max-height:none;overflow:auto}.pdf-thumb{min-width:150px}}
