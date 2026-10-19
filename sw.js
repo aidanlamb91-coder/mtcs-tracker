@@ -1,5 +1,5 @@
 /* MTCS Tracker service worker — offline app shell. Bump VERSION on each release. */
-const VERSION = "mtcs-0.2.4.0";
+const VERSION = "mtcs-0.2.5.0";
 const CACHE = "mtcs-tracker:" + VERSION;
 const SHELL = ["./","index.html","manifest.webmanifest","css/styles.css","js/app.js","js/pack-meta.js","js/parser.js","js/vendor/jszip.min.js","js/vendor/pdf-lib.min.js","js/vendor/pdf.min.js","js/vendor/pdf.worker.min.js","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-192.png","icons/icon-maskable-512.png","icons/apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil((async () => { const c = await caches.open(CACHE); await c.addAll(SHELL.map(u => new Request(u, { cache: "reload" }))); await self.skipWaiting(); })()); });
