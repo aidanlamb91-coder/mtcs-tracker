@@ -605,3 +605,13 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .pdf-main{min-width:0}
 .pdf-page-img{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
 @media (max-width:640px){.pdf-viewer{grid-template-columns:1fr}.pdf-thumbs{flex-direction:row;max-height:none;overflow:auto}.pdf-thumb{min-width:150px}}
+/* Beta v0.2.6: evidence-type chips + awaiting attachment */
+.type-chips{display:flex;gap:4px;flex-wrap:wrap;padding:0 14px 10px 54px}
+.type-chips .segchip{min-width:40px;min-height:36px}
+.cc-row-wrap{flex-wrap:wrap}.cc-row-wrap>.cc-row{flex:1 1 calc(100% - 40px)}.cc-row-wrap>.type-chips{flex:1 1 100%}
+.cc-row-wrap.awaiting{background:#fff4e5;border-left:4px solid #f08a00}
+.pill.await{background:#ffe2bf;color:#8a4500;border:1px solid #f08a00}
+.await-txt{color:#8a4500}
+.seg .await-f{color:#8a4500}
+.qlink{flex:1 1 100%;display:flex;gap:6px;align-items:center;padding:0 14px 10px 54px}.qlink select{flex:1;min-height:36px;max-width:100%}
+.cc-row .chips{flex-wrap:wrap}
