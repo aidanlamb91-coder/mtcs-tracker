@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.8";
+const APP_VERSION="0.2.9";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -323,7 +323,7 @@ if(flow.step===1)return `<div class="scrim" data-action="close-modal"></div><div
 ${flow.mode==="select"?`<div class="signoff-list" data-testid="signoff-select-list">${groups.map(g=>`<h3 style="margin-top:12px">Activity ${g.act.n} · ${esc(g.act.title)}</h3>${g.comps.map(x=>{const key=selectionKey(g.act.id,x.comp.id);const already=(g.act.signOffSelections||[]).some(sel=>sel.compId===x.comp.id);return `<label class="checkline signoff-row"><input type="checkbox" data-assessor-comp="${key}" ${flow.selected.has(key)?"checked":""}> <span class="grow"><b>${esc(compLabel(x.comp))} · ${esc(x.comp.title)}</b><span class="small muted" style="display:block">${x.crits.length} planned criteria (${x.crits.map(k=>k.id).join(", ")})${already?" · already signed — signing again updates it":""}</span></span></label>`;}).join("")}`).join("")||`<p class="small muted">No planned competencies yet — add some in an activity Assessment plan first.</p>`}</div>`:`<p class="small" style="margin-top:10px">All planned competencies in all activities (${groups.reduce((n,g)=>n+g.comps.length,0)} competencies).</p>`}
 <div class="warn-box" style="margin-top:12px"><b data-testid="assessor-sign-summary">${esc(summaryText)}</b></div></div><footer class="merge-foot"><button class="btn" data-action="close-modal">Cancel</button><button class="btn primary" data-action="assessor-to-pad" data-testid="assessor-sign-next" ${flow.mode==="select"&&!flow.selected.size?"disabled":""}>Sign</button></footer></div>`;
 const entryAct=actOf(p,flow.actId)||p.activities[0];
-return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog" data-testid="assessor-sign-pad-modal"><header><h2>Assessor sign-off — draw signature</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><p class="small muted">${SIG_NOTE}</p><p class="small" data-testid="assessor-sign-summary">${esc(summaryText)}</p><div class="field"><label>Assessor name</label><input id="assessor-sig-name" data-testid="assessor-sig-name" value="${esc((entryAct&&(entryAct.assessorName))||p.assessedBy||"")}" placeholder="Assessor printed name (BLOCK CAPITALS on forms)"></div><canvas id="assessor-sig-pad" class="sig-pad" width="640" height="240" data-testid="assessor-sig-pad"></canvas><div class="btn-row"><label class="btn">Upload signature image<input type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" hidden data-upload="assessor-signature" data-testid="assessor-sig-upload"></label></div><p class="tiny muted">Draw above (or upload) then press Done. The signature image is stored on this device per activity signed.</p></div><footer><button class="btn" data-action="assessor-back">Back</button><button class="btn primary" data-action="assessor-sign-save" data-testid="assessor-sign-done">Done</button></footer></div>`;}}
+return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog" data-testid="assessor-sign-pad-modal"><header><h2>Assessor sign-off — draw signature</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><p class="small muted">${SIG_NOTE}</p><p class="small" data-testid="assessor-sign-summary">${esc(summaryText)}</p><div class="field"><label>Assessor name</label><input id="assessor-sig-name" data-testid="assessor-sig-name" value="${esc((entryAct&&(entryAct.assessorName))||p.assessedBy||"")}" placeholder="Assessor printed name (BLOCK CAPITALS on forms)"></div>${sigPadHTML("assessor-sig-pad","assessor-sig-pad","assessor")}<div class="btn-row"><label class="btn">Upload signature image<input type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" hidden data-upload="assessor-signature" data-testid="assessor-sig-upload"></label></div><p class="tiny muted">Draw above (or upload) then press Done. The signature image is stored on this device per activity signed.</p></div><footer><button class="btn" data-action="assessor-back">Back</button><button class="btn primary" data-action="assessor-sign-save" data-testid="assessor-sign-done">Done</button></footer></div>`;}}
 if(ui.modal==="pdf-preview"){const pv=ui.pdfPreview;if(pv){const cur=pv.pages[pv.idx]||null;return `<div class="scrim" data-action="close-modal"></div><div class="modal merge pdf-modal" role="dialog" data-testid="submission-preview"><header><h2>${esc(pv.title||"Preview")}${pv.scopeActId?" — Activity "+esc((actOf(active(),pv.scopeActId)||{}).n||""):""}</h2><button class="close" data-action="close-modal">✕</button></header><div class="body">
 <p class="small muted">This is the actual filled PDF, rendered page by page — exactly what will be in the download (not editable here).</p>
 ${pv.loading?`<p class="small" data-testid="pdf-preview-loading">Building filled forms…</p>`:pv.error?`<div class="warn-box"><b>Preview failed</b><p class="small">${esc(pv.error)}</p></div>`:`${pv.codeFills?`<p class="tiny muted" data-testid="code-fills">Type of Evidence filled: ${pv.codeFills.length?esc(pv.codeFills.join(" · ")):"none yet — pick O/P/W/Q on Criteria"}</p>`:""}${pv.warnings&&pv.warnings.length?`<div class="warn-box" data-testid="submission-warnings"><b>Check before exporting (${pv.warnings.length})</b><ul>${pv.warnings.map(w=>`<li class="small">${esc(w)}</li>`).join("")}</ul><label class="checkline"><input type="checkbox" id="sub-confirm" data-testid="sub-confirm"> I've checked these warnings and want to export anyway</label></div>`:`<div class="pack-status" style="background:#f5fbf7;border:1px solid #cfe9d8"><b>✓ No warnings</b></div>`}
@@ -463,8 +463,20 @@ const a=r.activity;a.versions=a.versions||[];a.versions.push({version:a.version,
 Object.keys(p.criteria).forEach(cid=>{delete p.criteria[cid][a.id];});Object.entries(r.payload.criteria||{}).forEach(([cid,cv])=>{p.criteria[cid]=p.criteria[cid]||{};p.criteria[cid][a.id]=cv;});
 for(const e of r.payload.evidence||[]){const en=(r.manifest.files||[]).find(f=>f.id===e.id);if(!en||!r.zip.file(en.path))continue;const blob=await r.zip.file(en.path).async("blob");const ex=p.evidence.find(x=>x.id===e.id);if(ex){await blobSet(ex.blobId,blob);Object.assign(ex,e,{blobId:ex.blobId});}else{const blobId=uid("blob");await blobSet(blobId,blob);p.evidence.push(Object.assign({},e,{blobId}));}}
 if(a.signedOn)a.status="Signed";save();ui.pendingReturn=null;toast("Return applied as v"+a.version+". Previous version kept for rollback.");render();}
+/* v0.2.9 signature geometry: inner box = target cell aspect (Assessor Competence Sign-Off form). Strokes in the darker margin are kept and overflow the cell proportionally on the PDF. */
+const SIG_CELL={candidate:{w:163,h:14,label:"Candidate Signature cell"},assessor:{w:88,h:13,label:"sign-off row Signature cell"}};
+const PAD_W=640,PAD_IX=100,PAD_IW=440,PAD_MY=70;
+function padGeom(kind){const c=SIG_CELL[kind]||SIG_CELL.candidate;const ih=Math.round(PAD_IW*c.h/c.w);return{w:PAD_W,h:ih+2*PAD_MY,inner:[PAD_IX,PAD_MY,PAD_IW,ih]};}
+function sigPadHTML(id,testid,kind){const g=padGeom(kind);const pct=(v,t)=>(100*v/t).toFixed(3)+"%";return `<div class="sig-pad-wrap" data-pad-kind="${kind}" style="aspect-ratio:${g.w}/${g.h}"><div class="sig-inner" data-testid="${testid}-inner" style="left:${pct(g.inner[0],g.w)};top:${pct(g.inner[1],g.h)};width:${pct(g.inner[2],g.w)};height:${pct(g.inner[3],g.h)}"><span>sign here</span></div><canvas id="${id}" class="sig-pad v029" width="${g.w}" height="${g.h}" data-testid="${testid}" data-pad-kind="${kind}"></canvas></div><p class="tiny muted">The white box matches the ${SIG_CELL[kind].label} on the MTCS Assessor sign-off form. Strokes in the grey margin are kept and run over the cell edge on the form.</p>`;}
+function sigMetaOf(blobId){return (S.profile.sigMeta||{})[blobId]||null;}
+function setSigMeta(blobId,kind){S.profile.sigMeta=S.profile.sigMeta||{};const g=padGeom(kind);S.profile.sigMeta[blobId]={w:g.w,h:g.h,inner:g.inner,kind};}
+/* Place a signature PNG at a PDF rect without distortion. Drawn pads: inner box maps to the rect (aspect kept, centred), margin overflows. Uploads/legacy: contain inside rect. */
+function sigPlacement(rect,imgW,imgH,meta){
+  if(meta&&meta.inner){const [ix,iy,iw,ih]=meta.inner;const sx=imgW/meta.w,sy=imgH/meta.h;const IW=iw*sx,IH=ih*sy,IX=ix*sx,IY=iy*sy;const s=Math.min(rect.width/IW,rect.height/IH);const ox=rect.x,oy=rect.y+(rect.height-IH*s)/2;return{x:ox-IX*s,y:oy-(imgH-IY-IH)*s,width:imgW*s,height:imgH*s,mode:"pad",scale:s};}
+  const s=Math.min(rect.width/imgW,rect.height/imgH);const w=imgW*s,h=imgH*s;return{x:rect.x+(rect.width-w)/2,y:rect.y+(rect.height-h)/2,width:w,height:h,mode:"contain",scale:s};}
+async function drawSigInRect(pdf,page,rect,blobId,png){const pl=sigPlacement(rect,png.width,png.height,sigMetaOf(blobId));page.drawImage(png,{x:pl.x,y:pl.y,width:pl.width,height:pl.height});(window.__sigPlacements=window.__sigPlacements||[]).push({rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},pl,imgW:png.width,imgH:png.height});return pl;}
 function initSigPad(){["sig-pad","assessor-sig-pad"].forEach(id=>initOnePad(document.getElementById(id)));}
-function initOnePad(c){if(!c||c.dataset.init)return;c.dataset.init="1";const ctx=c.getContext("2d");ctx.lineWidth=2.4;ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle="#14324a";let drawing=false,last=null;
+function initOnePad(c){if(!c||c.dataset.init)return;c.dataset.init="1";const ctx=c.getContext("2d");ctx.lineWidth=3.2;ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle="#14324a";let drawing=false,last=null;
 const pos=e=>{const r=c.getBoundingClientRect();return{x:(e.clientX-r.left)*(c.width/r.width),y:(e.clientY-r.top)*(c.height/r.height)};};
 c.addEventListener("pointerdown",e=>{drawing=true;last=pos(e);try{c.setPointerCapture(e.pointerId);}catch(_){}e.preventDefault();});
 c.addEventListener("pointermove",e=>{if(!drawing)return;const pt=pos(e);ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(pt.x,pt.y);ctx.stroke();last=pt;c.dataset.dirty="1";});
@@ -475,7 +487,7 @@ return `<section class="card" id="profile" data-testid="profile-card"><div class
 <div class="field"><label>Your name</label><input value="${esc(nameVal)}" data-profile-name data-testid="profile-name" placeholder="Your full name"></div>
 <h3>Your signature</h3><p class="small muted">Draw once, reuse where a form asks you to sign. Stored only on this device. This is a drawn signature image for convenience — it is not a legal e-signature service; MTCS ink requirements still apply.</p>
 ${hasSig&&!ui.sigPadOpen?`${ui.sigUrl?`<img src="${ui.sigUrl}" alt="Your saved signature" class="sig-preview" data-testid="sig-preview">`:`<p class="small">✓ Signature saved</p>`}<p class="tiny muted">Saved ${S.profile.signatureUpdatedAt?fmtDate(S.profile.signatureUpdatedAt):""}</p><div class="btn-row"><button class="btn" data-action="sig-replace" data-testid="sig-replace">Replace — draw again</button>${uploadBtn}<button class="btn ghost" data-action="sig-clear" data-testid="sig-clear">Clear</button></div>`
-:`<canvas id="sig-pad" class="sig-pad" width="640" height="240" data-testid="sig-pad"></canvas><div class="btn-row"><button class="btn primary" data-action="sig-save" data-testid="sig-save">Save signature</button>${uploadBtn}${hasSig?`<button class="btn" data-action="sig-cancel-pad">Cancel</button>`:""}</div><p class="tiny muted">Or upload a PNG/JPG photo or scan of your ink signature — it is placed on a white background and stored on this device like a drawn one.</p>`}
+:`${sigPadHTML("sig-pad","sig-pad","candidate")}<div class="btn-row"><button class="btn primary" data-action="sig-save" data-testid="sig-save">Save signature</button>${uploadBtn}${hasSig?`<button class="btn" data-action="sig-cancel-pad">Cancel</button>`:""}</div><p class="tiny muted">Or upload a PNG/JPG photo or scan of your ink signature — it is placed on a white background and stored on this device like a drawn one.</p>`}
 </section>`;}
 /* ---- v0.2.3 submission pack: filled forms, signatures, preview ---- */
 function submissionFormsPlan(p,scopeActId){
@@ -566,8 +578,7 @@ async function drawSigAtField(pdf,form,fieldName,blobId,log){
     const png=await pdf.embedPng(await blob.arrayBuffer());
     const w=f.acroField.getWidgets()[0]; const rect=w.getRectangle(); const page=pdf.getPages().find(pg=>pg.ref===w.P());
     if(!page||!rect||rect.width<8)return false;
-    const iw=Math.min(rect.width, Math.max(20,rect.width)); const ih=Math.min(rect.height, iw*(png.height/png.width));
-    page.drawImage(png,{x:rect.x,y:rect.y,width:iw,height:ih}); if(log)log.push("signature at "+fieldName); return true;
+    await drawSigInRect(pdf,page,rect,blobId,png); if(log)log.push("signature at "+fieldName); return true;
   }catch(e){return false;}
 }
 
@@ -648,9 +659,9 @@ async function tryPlaceSig(pdf,form,blobId,who,name,dateStr,log){
     const blob=await blobGet(blobId); if(!blob)return false;
     const png=await pdf.embedPng(await blob.arrayBuffer());
     const fields=form?form.getFields():[];
-    const specific=who==="candidate"?/candidate signature/i:/assessor signature/i;
-    const sf=fields.find(f=>specific.test(f.getName())&&f.acroField&&f.acroField.getWidgets().length)||fields.find(f=>/signature/i.test(f.getName())&&f.acroField&&f.acroField.getWidgets().length);
-    if(sf){const w=sf.acroField.getWidgets()[0];const rect=w.getRectangle();const page=pdf.getPages().find(pg=>pg.ref===w.P());if(page&&rect&&rect.width>10){page.drawImage(png,{x:rect.x,y:rect.y,width:Math.min(rect.width,180),height:Math.min(rect.height,Math.min(rect.width,180)*(png.height/png.width))});log.push(who+" signature image placed at form field '"+sf.getName()+"'.");return true;}}
+    const specific=who==="candidate"?/^candidate signature$/i:/^assessor signature$/i;
+    const sf=fields.find(f=>specific.test(f.getName().trim())&&f.acroField&&f.acroField.getWidgets().length);
+    if(sf){const w=sf.acroField.getWidgets()[0];const rect=w.getRectangle();const page=pdf.getPages().find(pg=>pg.ref===w.P());if(page&&rect&&rect.width>10){await drawSigInRect(pdf,page,rect,blobId,png);log.push(who+" signature image placed at form field '"+sf.getName()+"'.");return true;}}
   }catch(e){log.push(who+" signature placement failed: "+e.message);}
   return false;
 }
@@ -733,7 +744,7 @@ async function fillFormForSubmission(entry,p){
   if(includeCand)candPlaced=await tryPlaceSig(pdf,form,S.profile.signatureBlobId,"candidate",cand,todayISO(),filled);
   if(includeAss)assPlaced=await tryPlaceSig(pdf,form,assActForSig.assessorSig.blobId,"assessor",assessor,todayISO(),filled);
   const needCriteriaSheet=/Assessment Plan|Competence/i.test(kind);
-  if(needCriteriaSheet|| (includeCand&&!candPlaced) || (includeAss&&!assPlaced)){
+  if(needCriteriaSheet){
     const page=pdf.addPage(); const {height}=page.getSize(); let y=height-40;
     const line=(t,size)=>{const str=String(t); const chunks=[]; for(let i=0;i<str.length;i+=95)chunks.push(str.slice(i,i+95)); chunks.forEach(c=>{if(y<50){} page.drawText(c,{x:40,y,size:size||9}); y-=13;});};
     line("Criteria covered — Activity "+(a?a.n:"")+" (appended by MTCS Tracker Beta v"+APP_VERSION+")",11);
@@ -745,8 +756,7 @@ async function fillFormForSubmission(entry,p){
     const embedSig=async(blobId,label,name,placed)=>{
       if(placed)return; try{const b=await blobGet(blobId); if(!b)return; const png=await pdf.embedPng(await b.arrayBuffer()); const w=Math.min(260,png.width, page.getSize().width-80); const h=w*(png.height/png.width); y-=h+18; page.drawText(label+": "+name+"  "+todayISO(),{x:40,y:y+h+4,size:9}); page.drawImage(png,{x:40,y,width:w,height:Math.min(h,120)}); appended.push(label+" image on appended sheet.");}catch(e){warn.push(label+" sig append: "+e.message);}
     };
-    if(includeCand)await embedSig(S.profile.signatureBlobId,"Candidate signature",cand,candPlaced);
-    if(includeAss&&assActForSig)await embedSig(assActForSig.assessorSig.blobId,"Assessor signature",assessor,assPlaced);
+    /* v0.2.9: no signature images on forms that have no signature field. */
     if(needCriteriaSheet)appended.push("Criteria covered — Activity "+(a?a.n:"")+" sheet with full criterion wording (form field holds codes; full text appended for readability).");
   }
   try{if(form)form.updateFieldAppearances();}catch(_){}
@@ -784,8 +794,8 @@ set("Candidate Name",p?p.name:"");set("Candidate name",p?p.name:"");set("Date",t
 if(a){set("Activity Number 12 or 3",a.n);set("Work activity to be assessed",a.summary||a.title);set("Which performance criteria in the competences do you intend to assess",CRITS.filter(k=>cov(p,k.id,a.id).status!=="Gap").map(k=>k.id).join(", "));set("What date or dates will the assessment take place",a.dates);set("Where will the assessment take place eg name of vessel installation system workshop etc",a.where);set("Witness name if applicable",a.witness);set("Assessor name",a.assessorName);set("Please specify the reasons for your decision",a.feedbackText);set("Candidates comments",a.candidateComments);}
 let sigNote="";
 if(ui.fillSig&&S.profile.signatureBlobId){try{const sigBlob=await blobGet(S.profile.signatureBlobId);if(sigBlob){const png=await pdf.embedPng(await sigBlob.arrayBuffer());let placed=false;
-try{const fields=form.getFields();const sf=fields.find(f=>/signature/i.test(f.getName()));if(sf&&sf.acroField&&sf.acroField.getWidgets().length){const w=sf.acroField.getWidgets()[0];const rect=w.getRectangle();const page=pdf.getPages().find(pg=>pg.ref===w.P());if(page&&rect&&rect.width>10){page.drawImage(png,{x:rect.x,y:rect.y,width:rect.width,height:Math.min(rect.height,rect.width*(png.height/png.width))});placed=true;}}}catch(_){}
-if(!placed){const page=pdf.addPage();const {width,height}=page.getSize();page.drawText("Signature image added from Profile — not a legal e-signature service; MTCS ink requirements still apply",{x:40,y:height-50,size:9});page.drawImage(png,{x:40,y:height-220,width:Math.min(300,png.width),height:Math.min(150,(Math.min(300,png.width))*(png.height/png.width))});page.drawText((p?p.name:"")+" · "+todayISO(),{x:40,y:height-245,size:10});sigNote=" Signature appended on an added page.";}
+try{const fields=form.getFields();const sf=fields.find(f=>/^candidate signature$/i.test(f.getName().trim()));if(sf&&sf.acroField&&sf.acroField.getWidgets().length){const w=sf.acroField.getWidgets()[0];const rect=w.getRectangle();const page=pdf.getPages().find(pg=>pg.ref===w.P());if(page&&rect&&rect.width>10){await drawSigInRect(pdf,page,rect,S.profile.signatureBlobId,png);placed=true;}}}catch(_){}
+if(!placed){sigNote=" This form has no candidate signature field, so no signature was added.";}
 else sigNote=" Signature added at the form signature field.";}}catch(se){sigNote=" Signature could not be added ("+se.message+").";}}
 downloadBlob(new Blob([await pdf.save()],{type:"application/pdf"}),t.fileName.replace(/\.pdf$/i,"")+"_FILLED.pdf");toast("Filled copy downloaded. Stored blank unchanged."+sigNote);}
 catch(e){downloadBlob(blob,t.fileName);toast("Couldn't fill this PDF ("+e.message+") — blank downloaded instead.");}ui.fillTpl=null;render();}
@@ -878,11 +888,11 @@ else if(a==="assessor-sign-open"&&p){ui.assessorSignAct=el.dataset.act;ui.assess
 else if(a==="assessor-mode"&&ui.assessorFlow){ui.assessorFlow.mode=el.dataset.mode;render();}
 else if(a==="assessor-to-pad"&&ui.assessorFlow){if(ui.assessorFlow.mode==="select"&&!ui.assessorFlow.selected.size){toast("Choose at least one competence to sign off, or choose \u2018Sign for all planned activities\u2019.");return;}ui.assessorFlow.step=2;render();}
 else if(a==="assessor-back"&&ui.assessorFlow){ui.assessorFlow.step=1;render();}
-else if(a==="assessor-sign-save"&&p){const c=document.getElementById("assessor-sig-pad");const nameEl=document.getElementById("assessor-sig-name");if(!c||!c.dataset.dirty){toast("Draw the assessor signature first, or upload an image.");return;}const blob=await new Promise(r=>c.toBlob(r,"image/png"));if(!blob){toast("Could not save that drawing.");return;}const bid=uid("asig");await blobSet(bid,blob);await applyAssessorSigning(p,bid,"drawn",nameEl?nameEl.value.trim():"");}
+else if(a==="assessor-sign-save"&&p){const c=document.getElementById("assessor-sig-pad");const nameEl=document.getElementById("assessor-sig-name");if(!c||!c.dataset.dirty){toast("Draw the assessor signature first, or upload an image.");return;}const blob=await new Promise(r=>c.toBlob(r,"image/png"));if(!blob){toast("Could not save that drawing.");return;}const bid=uid("asig");await blobSet(bid,blob);setSigMeta(bid,"assessor");await applyAssessorSigning(p,bid,"drawn",nameEl?nameEl.value.trim():"");}
 else if(a==="sig-replace"){ui.sigPadOpen=true;render();}
 else if(a==="sig-cancel-pad"){ui.sigPadOpen=false;render();}
 else if(a==="sig-clear"){if(confirm("Clear your saved signature from this device? Forms already downloaded keep theirs.")){const old=S.profile.signatureBlobId;S.profile.signatureBlobId=null;S.profile.signatureUpdatedAt=null;ui.sigUrl=null;ui.sigPadOpen=true;if(old&&!blobIsReferenced(old,null)){try{await blobDel(old);}catch(_){}}save();toast("Signature cleared.");render();}}
-else if(a==="sig-save"){const c=document.getElementById("sig-pad");if(!c||!c.dataset.dirty){toast("Draw your signature first.");return;}const blob=await new Promise(r=>c.toBlob(r,"image/png"));if(!blob){toast("Could not save that drawing.");return;}const old=S.profile.signatureBlobId,newId=uid("sig");await blobSet(newId,blob);S.profile.signatureBlobId=newId;S.profile.signatureUpdatedAt=new Date().toISOString();if(old&&old!==newId){try{await blobDel(old);}catch(_){}}if(ui.sigUrl)URL.revokeObjectURL(ui.sigUrl);ui.sigUrl=URL.createObjectURL(blob);ui.sigPadOpen=false;save();toast("Signature saved on this device.");render();}
+else if(a==="sig-save"){const c=document.getElementById("sig-pad");if(!c||!c.dataset.dirty){toast("Draw your signature first.");return;}const blob=await new Promise(r=>c.toBlob(r,"image/png"));if(!blob){toast("Could not save that drawing.");return;}const old=S.profile.signatureBlobId,newId=uid("sig");await blobSet(newId,blob);setSigMeta(newId,"candidate");S.profile.signatureBlobId=newId;S.profile.signatureUpdatedAt=new Date().toISOString();if(old&&old!==newId){try{await blobDel(old);}catch(_){}if(S.profile.sigMeta)delete S.profile.sigMeta[old];}if(ui.sigUrl)URL.revokeObjectURL(ui.sigUrl);ui.sigUrl=URL.createObjectURL(blob);ui.sigPadOpen=false;save();toast("Signature saved on this device.");render();}
 else if(a==="cancel-backup-import"){ui.pendingBackup=null;render();}
 else if(a==="confirm-backup-import"){await applyBackup(ui.pendingBackup);}
 else if(a==="cancel-return"){ui.pendingReturn=null;render();}

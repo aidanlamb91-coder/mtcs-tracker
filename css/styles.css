@@ -624,3 +624,8 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .cc-row-wrap>.type-chips{flex:none;padding:0;gap:2px;flex-wrap:nowrap}
 .type-chips .segchip{min-width:30px;min-height:32px;padding:0 4px;font-size:.75rem}
 .cc-row-wrap>.qlink{flex:1 1 100%;padding:0 4px 6px 26px}.qlink select{min-height:30px;font-size:.78rem}
+/* Beta v0.2.9 signature pad: inner box = form cell aspect, darker margin keeps overflow strokes */
+.sig-pad-wrap{position:relative;width:100%;background:#cfd8e2;border-radius:10px;overflow:hidden;touch-action:none}
+.sig-pad-wrap .sig-inner{position:absolute;background:#fff;border:2px solid #14324a;border-radius:2px;box-sizing:border-box;display:grid;place-items:center;pointer-events:none}
+.sig-pad-wrap .sig-inner span{font-size:.62rem;color:#a7b2c0;letter-spacing:.04em}
+.sig-pad-wrap canvas.sig-pad.v029{position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent;border-radius:0}
