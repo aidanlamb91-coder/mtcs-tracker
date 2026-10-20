@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.13";
+const APP_VERSION="0.2.14";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -688,6 +688,23 @@ async function tryPlaceSig(pdf,form,blobId,who,name,dateStr,log){
   }catch(e){log.push(who+" signature placement failed: "+e.message);}
   return false;
 }
+/* v0.2.14: plan criteria field — "Core\n1, a, b" grouped, Core first, letters sorted. */
+function planCritText(crits){
+  const g=new Map();
+  crits.forEach(k=>{const c=k.comp; if(!c)return; const head=c.unitId==="core"?"Core":String(c.unitShort||c.unitTitle||"Role").trim();
+    if(!g.has(head))g.set(head,{core:c.unitId==="core",comps:new Map()}); const G=g.get(head).comps; const n=Number(c.number)||0;
+    if(!G.has(n))G.set(n,new Set()); G.get(n).add((String(k.id).match(/[a-z]$/)||[String.fromCharCode(97+Math.max(0,(c.criteria||[]).indexOf(k)))])[0]);});
+  return [...g.entries()].sort((a,b)=>(b[1].core-a[1].core)).map(([h,v])=>h+"\n"+[...v.comps.entries()].sort((a,b)=>a[0]-b[0]).map(([n,ls])=>n+", "+[...ls].sort().join(", ")).join("\n")).join("\n");
+}
+function setAutoFit(form,name,text,warn,filled){
+  let f0=null; try{f0=form.getTextField(name);}catch(_){return;}
+  try{const f=f0; try{f.enableMultiline();}catch(_){} const r=f.acroField.getWidgets()[0].getRectangle();
+    const lines=String(text).split("\n"); const longest=Math.max(...lines.map(l=>l.length),1);
+    let size=Math.min(10,(r.height-4)/(lines.length*1.18),(r.width-6)/(longest*0.56)); const MIN=6;
+    if(size<MIN){size=MIN; warn.push("Assessment Plan criteria list ("+lines.length+" lines) does not fully fit the form field even at "+MIN+"pt — check the plan or split the activity.");}
+    f.setFontSize(Math.floor(size*2)/2); f.setText(text); if(!filled.includes(name))filled.push(name);
+  }catch(e){warn.push("Criteria field: "+e.message);}
+}
 async function fillFormForSubmission(entry,p){
   const {tpl,act:a,kind}=entry; const filled=[],appended=[],warn=[];
   const blob=await blobGet(tpl.blobId); if(!blob)throw new Error("Stored blank missing: "+tpl.fileName);
@@ -702,7 +719,7 @@ async function fillFormForSubmission(entry,p){
   if(a){
     set("Activity Number 12 or 3",a.n);
     set("Work activity to be assessed",a.summary||a.title);
-    set("Which performance criteria in the competences do you intend to assess",critCodes);
+    if(form&&crits.length)setAutoFit(form,"Which performance criteria in the competences do you intend to assess",planCritText(crits),warn,filled);
     set("What type of evidence will be assessed Observation Work Product Questioning or other please specify",types||a.planText||"");
     set("What date or dates will the assessment take place",a.dates); set("Where will the assessment take place eg name of vessel installation system workshop etc",a.where);
     set("Witness name if applicable",a.witness); set("Witness name If applicable in assessment plan",a.witness); set("Particular assessment needs and name of any witness involved",a.witness||a.planText||"");
@@ -748,16 +765,7 @@ async function fillFormForSubmission(entry,p){
         if((pr.act.ukq||[]).some(u=>u.q||u.a))set(signOffFieldNames(rowIdx,1).know,"Yes");
       }
     }
-    if(pairs.length||overflow.length){
-      const page=pdf.addPage(); const {height}=page.getSize(); let y=height-40;
-      const line=(t,size)=>{const str=String(t); for(let i=0;i<str.length;i+=95){page.drawText(str.slice(i,i+95),{x:40,y,size:size||9}); y-=13;}};
-      line("Assessor sign-off — signed competencies (appended by MTCS Tracker Beta v"+APP_VERSION+")",11);
-      line("Candidate: "+cand+"  Route: "+p.routeLabel+"  Date: "+todayISO(),9); y-=6;
-      pairs.forEach(pr=>{line((compLabel(pr.comp)+" "+(pr.comp.title||"")).trim()+" — Activity "+pr.act.n+" — signed by "+String(pr.sel.assessorName||assessor||"Assessor")+" on "+String(pr.sel.signedAt||"").slice(0,10)+" — criteria: "+((pr.sel.criteriaIds||[]).join(", ")||"—"),8.5);});
-      overflow.forEach(comp=>line((compLabel(comp)+" "+(comp.title||"")).trim()+" — signed (no row left on the form; listed here only)",8.5));
-      y-=6; line(SIG_NOTE,8.5);
-      appended.push("Assessor sign-off table: per-competence Signature/Date fields filled for signed competencies"+(overflow.length?(", "+overflow.length+" competence(s) listed on the appended sheet only (form rows full)"):"")+", signed-competencies sheet appended for checking.");
-    }
+    if(overflow.length)warn.push(overflow.length+" signed competence(s) have no row left on the sign-off form: "+overflow.map(c=>compShortId(c)).join(", "));
   }
   // signatures: only when explicitly signed
   let candPlaced=false, assPlaced=false;
@@ -766,22 +774,7 @@ async function fillFormForSubmission(entry,p){
   const includeAss=!!(assActForSig&&assActForSig.assessorSig&&assActForSig.assessorSig.blobId);
   if(includeCand)candPlaced=await tryPlaceSig(pdf,form,S.profile.signatureBlobId,"candidate",cand,todayISO(),filled);
   if(includeAss)assPlaced=await tryPlaceSig(pdf,form,assActForSig.assessorSig.blobId,"assessor",assessor,todayISO(),filled);
-  const needCriteriaSheet=/Assessment Plan|Competence/i.test(kind);
-  if(needCriteriaSheet){
-    const page=pdf.addPage(); const {height}=page.getSize(); let y=height-40;
-    const line=(t,size)=>{const str=String(t); const chunks=[]; for(let i=0;i<str.length;i+=95)chunks.push(str.slice(i,i+95)); chunks.forEach(c=>{if(y<50){} page.drawText(c,{x:40,y,size:size||9}); y-=13;});};
-    line("Criteria covered — Activity "+(a?a.n:"")+" (appended by MTCS Tracker Beta v"+APP_VERSION+")",11);
-    line("Candidate: "+cand+"  Route: "+p.routeLabel+"  Date: "+todayISO(),9);
-    if(a)line("Activity: "+(a.title||"")+"  Dates: "+(a.dates||"")+"  Where: "+(a.where||""),9);
-    y-=6;
-    crits.forEach(k=>{const cv=a?cov(p,k.id,a.id):{status:"",code:""}; line(k.id+" ["+(cv.status||"")+(cv.code?" / "+cv.code:"")+"] "+k.text,8.5);});
-    y-=6; line(SIG_NOTE,8.5);
-    const embedSig=async(blobId,label,name,placed)=>{
-      if(placed)return; try{const b=await blobGet(blobId); if(!b)return; const png=await pdf.embedPng(await b.arrayBuffer()); const w=Math.min(260,png.width, page.getSize().width-80); const h=w*(png.height/png.width); y-=h+18; page.drawText(label+": "+name+"  "+todayISO(),{x:40,y:y+h+4,size:9}); page.drawImage(png,{x:40,y,width:w,height:Math.min(h,120)}); appended.push(label+" image on appended sheet.");}catch(e){warn.push(label+" sig append: "+e.message);}
-    };
-    /* v0.2.9: no signature images on forms that have no signature field. */
-    if(needCriteriaSheet)appended.push("Criteria covered — Activity "+(a?a.n:"")+" sheet with full criterion wording (form field holds codes; full text appended for readability).");
-  }
+  /* v0.2.14: no appended non-official pages on any form. */
   try{if(form)form.updateFieldAppearances();}catch(_){}
   return {blob:new Blob([await pdf.save()],{type:"application/pdf"}),filled,appended,warnings:warn};
 }
@@ -814,7 +807,7 @@ async function fillTemplate(tplId){const t=S.templates.find(x=>x.id===tplId),p=a
 const sel=document.getElementById("fill-act"),a=p&&sel?actOf(p,sel.value):null;
 try{const pdf=await PDFLib.PDFDocument.load(await blob.arrayBuffer()),form=pdf.getForm();const set=(n,v)=>{if(!v)return;try{form.getTextField(n).setText(String(v));}catch(_){}};
 set("Candidate Name",p?p.name:"");set("Candidate name",p?p.name:"");set("Date",todayISO());set("Date_2",todayISO());
-if(a){set("Activity Number 12 or 3",a.n);set("Work activity to be assessed",a.summary||a.title);set("Which performance criteria in the competences do you intend to assess",CRITS.filter(k=>cov(p,k.id,a.id).status!=="Gap").map(k=>k.id).join(", "));set("What date or dates will the assessment take place",a.dates);set("Where will the assessment take place eg name of vessel installation system workshop etc",a.where);set("Witness name if applicable",a.witness);set("Assessor name",a.assessorName);set("Please specify the reasons for your decision",a.feedbackText);set("Candidates comments",a.candidateComments);}
+if(a){set("Activity Number 12 or 3",a.n);set("Work activity to be assessed",a.summary||a.title);try{const t=planCritText(CRITS.filter(k=>cov(p,k.id,a.id).status!=="Gap"));if(t)setAutoFit(form,"Which performance criteria in the competences do you intend to assess",t,[],[]);}catch(_){}set("What date or dates will the assessment take place",a.dates);set("Where will the assessment take place eg name of vessel installation system workshop etc",a.where);set("Witness name if applicable",a.witness);set("Assessor name",a.assessorName);set("Please specify the reasons for your decision",a.feedbackText);set("Candidates comments",a.candidateComments);}
 let sigNote="";
 if(ui.fillSig&&S.profile.signatureBlobId){try{const sigBlob=await blobGet(S.profile.signatureBlobId);if(sigBlob){const png=await pdf.embedPng(await sigBlob.arrayBuffer());let placed=false;
 try{const fields=form.getFields();const sf=fields.find(f=>/^candidate signature$/i.test(f.getName().trim()));if(sf&&sf.acroField&&sf.acroField.getWidgets().length){const w=sf.acroField.getWidgets()[0];const rect=w.getRectangle();const page=pdf.getPages().find(pg=>pg.ref===w.P());if(page&&rect&&rect.width>10){await drawSigInRect(pdf,page,rect,S.profile.signatureBlobId,png);placed=true;}}}catch(_){}
@@ -1037,4 +1030,5 @@ const cur={"":"",dashboard:"#/dashboard",work:"#/work",activities:"#/work",activ
 (async function boot(){document.getElementById("app").innerHTML=`<div class="landing"><div class="card">Loading your portfolios from this browser…</div></div>`;
 try{await idbOpen();S.portfolios=(await kvGet("portfolios"))||[];S.templates=(await kvGet("templates"))||[];S.packImports=(await kvGet("packImports"))||[];S.shared=(await kvGet("shared"))||[];S.genPacks=(await kvGet("genPacks"))||[];S.profile=Object.assign(S.profile,(await kvGet("profile"))||{});S.settings=Object.assign(S.settings,(await kvGet("settings"))||{});S.feedbackQueue=(await kvGet("feedbackQueue"))||[];setTimeout(()=>retryFeedbackQueue(false),1500);await cleanupPackData();cleanupPortfolioPeople();migrateLegacyPortfolios();if(S.profile.signatureBlobId){blobGet(S.profile.signatureBlobId).then(b=>{if(b){ui.sigUrl=URL.createObjectURL(b);render();}}).catch(()=>{});}}catch(e){console.error("IndexedDB unavailable",e);}
 render();})();
+window.__mtcsQA={get S(){return S;},active:()=>active(),get COMPS(){return COMPS;},get CRITS(){return CRITS;},fillFormForSubmission,blobGet,save:()=>save()};
 })();
