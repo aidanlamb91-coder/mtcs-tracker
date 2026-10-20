@@ -629,3 +629,13 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .sig-pad-wrap .sig-inner{position:absolute;background:#fff;border:2px solid #14324a;border-radius:2px;box-sizing:border-box;display:grid;place-items:center;pointer-events:none}
 .sig-pad-wrap .sig-inner span{font-size:.62rem;color:#a7b2c0;letter-spacing:.04em}
 .sig-pad-wrap canvas.sig-pad.v029{position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent;border-radius:0}
+/* Beta v0.2.10 compact pad: box = 88x13 cell, full width, thin top/bottom bands */
+.sig-pad-wrap{border-radius:6px}
+.sig-pad-wrap .sig-inner{border-left:0;border-right:0;border-radius:0}
+.sig-big-done{display:none}
+.sig-tools{align-items:center;gap:8px;margin-top:6px}
+.sig-pad-wrap.big{position:fixed;z-index:10000;left:50%;top:50%;width:min(96vw,1400px);transform:translate(-50%,-50%);box-shadow:0 0 0 100vmax rgba(10,25,40,.82)}
+.sig-pad-wrap.big.rot{width:92vh;transform:translate(-50%,-50%) rotate(90deg)}
+.sig-pad-wrap.big .sig-big-done{display:block;position:absolute;right:6px;bottom:-44px;z-index:2}
+.sig-pad-wrap.big{overflow:visible}
+.sig-pad-host{margin-inline:-17px}.sig-pad-host .sig-pad-wrap{border-radius:0}
