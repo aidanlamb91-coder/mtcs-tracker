@@ -654,3 +654,8 @@ details.ag-plan[open]>summary::after{content:"▴"}
 /* Beta v0.2.13 feedback */
 .ok-box{border:1px solid #a8dbb9;background:var(--signed-bg);color:var(--signed);border-radius:10px;padding:10px 12px;margin-top:10px}
 .fb-status{margin-top:10px}.fb-card textarea{width:100%;resize:vertical}
+
+/* v0.2.15 update banner */
+.upd-banner{position:fixed;left:10px;right:10px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:9999;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:12px;background:#0f2a3a;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:14px}
+.upd-banner .upd-btns{display:flex;gap:8px}
+.upd-banner .btn{min-height:36px}

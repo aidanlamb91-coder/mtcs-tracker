@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.14";
+const APP_VERSION="0.2.15";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -50,7 +50,31 @@ const ui={openComps:new Set(),role:null,grade:"G2",mState:"Gap",mSearch:"",drawe
 let undoStack=[];
 let deferredInstall=null;
 window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstall=e;render();});
-if("serviceWorker" in navigator&&/^https?:$/.test(location.protocol)){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(err=>console.warn("SW failed",err)));}
+/* v0.2.15: update prompt (AS Forms style). No auto skipWaiting; banner when a new SW is waiting. */
+const UPD={reg:null,waiting:null,later:false,reloading:false,ver:"",shown:false};
+function updBusy(){const b=document.body;if([...b.classList].some(c=>/^sig-big/.test(c)))return true;if(ui&&ui.modal)return true;if(document.querySelector('canvas[data-dirty="1"]'))return true;const ae=document.activeElement;if(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)&&!ae.closest("#upd-banner"))return true;return false;}
+async function updFetchVer(){try{const r=await fetch("version.json?t="+Date.now(),{cache:"no-store"});if(r.ok){const j=await r.json();UPD.ver=String(j.version||"");}}catch(_){}}
+function updShow(){let el=document.getElementById("upd-banner");
+  if(!UPD.waiting||UPD.later||UPD.reloading){if(el)el.remove();return;}
+  if(updBusy()){if(el)el.remove();return;}
+  if(!el){el=document.createElement("div");el.id="upd-banner";el.className="upd-banner";el.setAttribute("role","status");el.dataset.testid="update-banner";document.body.appendChild(el);
+    el.addEventListener("click",ev=>{const b=ev.target.closest("[data-upd]");if(!b)return;if(b.dataset.upd==="reload")updApply();else{UPD.later=true;updShow();}});}
+  el.innerHTML=`<span><b>New version available${UPD.ver?" (v"+esc(UPD.ver)+")":""}</b></span><span class="upd-btns"><button class="btn sm" data-upd="later" data-testid="update-later">Later</button><button class="btn sm primary" data-upd="reload" data-testid="update-reload">Reload</button></span>`;}
+async function updSetWaiting(w){UPD.waiting=w;await updFetchVer();updShow();}
+function updApply(){const w=UPD.waiting;if(!w){location.reload();return;}UPD.reloading=true;try{sessionStorage.setItem("mtcs-upd-reload",String(Date.now()));}catch(_){}w.postMessage({type:"SKIP_WAITING"});updShow();setTimeout(()=>{if(UPD.reloading&&!UPD.didReload){UPD.didReload=true;location.reload();}},4000);}
+function updCheck(){UPD.later=false;if(UPD.reg)UPD.reg.update().catch(()=>{});if(UPD.reg&&UPD.reg.waiting&&navigator.serviceWorker.controller&&!UPD.waiting)updSetWaiting(UPD.reg.waiting);else updShow();}
+if("serviceWorker" in navigator&&/^https?:$/.test(location.protocol)){window.addEventListener("load",async()=>{
+  try{const hadController=!!navigator.serviceWorker.controller;
+    const reg=await navigator.serviceWorker.register("sw.js",{updateViaCache:"none"});UPD.reg=reg;window.__mtcsUpd=UPD;
+    if(reg.waiting&&hadController)updSetWaiting(reg.waiting);
+    reg.addEventListener("updatefound",()=>{const w=reg.installing;if(!w)return;w.addEventListener("statechange",()=>{if(w.state==="installed"&&navigator.serviceWorker.controller)updSetWaiting(w);});});
+    navigator.serviceWorker.addEventListener("controllerchange",()=>{if(!hadController||!UPD.reloading||UPD.didReload)return;UPD.didReload=true;location.reload();});
+    reg.update().catch(()=>{});
+    document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")updCheck();});
+    window.addEventListener("focus",updCheck);
+    setInterval(updCheck,30*60*1000);
+    setInterval(()=>{if(UPD.waiting&&!UPD.later)updShow();},1500);
+  }catch(err){console.warn("SW failed",err);}});}
 function newActivity(n){return{id:String(n),n,title:"Activity "+n,planCritIds:[],dates:"",summary:"",where:"",witness:"",assessorName:"",planText:"",feedbackText:"",candidateComments:"",status:"Gathering evidence",planAgreed:"",signedOn:"",exportSeq:0,version:1,versions:[],ukq:[{q:"",a:"",ok:""}],assessorSig:null,candidateSignedAt:null,sigAudit:[],signOffSelections:[]};}
 function newPortfolio(name,roleKey,grade,assessedBy){const role=ROLES.find(r=>r.key===roleKey);return{id:uid("pf"),name,roleKey,role:role.name,grade,assessedBy:assessedBy||"",genPackId:null,routeLabel:grade+" "+role.name+(coreLabelForGrade(grade)?" + "+coreLabelForGrade(grade):""),formsPromptSeen:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),activities:[newActivity(1),newActivity(2),newActivity(3)],criteria:{},evidence:[]};}
 const actOf=(p,id)=>p.activities.find(a=>a.id===String(id));
