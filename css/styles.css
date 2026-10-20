@@ -650,3 +650,4 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .sig-pad-wrap.big.full.rot{width:90vh}
 .sig-pad-wrap.big .sig-ov-bar{display:flex;gap:8px;position:absolute;left:0;right:0;top:calc(100% + 10px);justify-content:center;z-index:2}
 .sig-pad-wrap.big .sig-ov-bar .btn{min-height:44px}
+.sig-pad-wrap.big.full.rot{width:92vh}
