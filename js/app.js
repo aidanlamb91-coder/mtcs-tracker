@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.10";
+const APP_VERSION="0.2.11";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -468,7 +468,7 @@ if(a.signedOn)a.status="Signed";save();ui.pendingReturn=null;toast("Return appli
 const SIG_CELL={w:88,h:13,label:"per-competence Signature cell on the Assessor sign-off form"};
 const PAD_W=880,PAD_IH=Math.round(880*13/88),PAD_BAND=Math.round(PAD_IH*0.3);
 function padGeom(){return{w:PAD_W,h:PAD_IH+2*PAD_BAND,inner:[0,PAD_BAND,PAD_W,PAD_IH]};}
-function sigPadHTML(id,testid){const g=padGeom();const pct=(v,t)=>(100*v/t).toFixed(3)+"%";return `<div class="sig-pad-host"><div class="sig-pad-wrap" data-testid="${testid}-wrap" style="aspect-ratio:${g.w}/${g.h}"><div class="sig-inner" data-testid="${testid}-inner" style="left:0;top:${pct(g.inner[1],g.h)};width:100%;height:${pct(g.inner[3],g.h)}"><span>sign here</span></div><canvas id="${id}" class="sig-pad v029" width="${g.w}" height="${g.h}" data-testid="${testid}"></canvas><button type="button" class="btn sm sig-big-done" data-action="sig-big-off">Done ✓</button></div></div><div class="btn-row sig-tools"><button type="button" class="btn sm" data-action="sig-big" data-pad="${id}" data-testid="${testid}-big">⤢ Larger pad</button><span class="tiny muted">The white box is the exact shape of the ${SIG_CELL.label}. Turn your phone sideways or use Larger pad for more room — the shape stays the same.</span></div>`;}
+function sigPadHTML(id,testid){const g=padGeom();const pct=(v,t)=>(100*v/t).toFixed(3)+"%";return `<div class="sig-pad-host"><div class="sig-pad-wrap" data-testid="${testid}-wrap" style="aspect-ratio:${g.w}/${g.h}"><div class="sig-inner" data-testid="${testid}-inner" style="left:0;top:${pct(g.inner[1],g.h)};width:100%;height:${pct(g.inner[3],g.h)}"><span>sign here</span></div><canvas id="${id}" class="sig-pad v029" width="${g.w}" height="${g.h}" data-testid="${testid}"></canvas><div class="sig-ov-bar"><button type="button" class="btn sm" data-action="pad-clear" data-pad="${id}" data-testid="${testid}-clear-ov">✕ Clear</button><button type="button" class="btn sm" data-action="sig-size" data-pad="${id}" data-testid="${testid}-size">⤢ Larger</button><button type="button" class="btn sm primary" data-action="sig-big-off" data-testid="${testid}-done">Done ✓</button></div><button type="button" class="sig-tap" data-action="sig-open" data-pad="${id}" data-testid="${testid}-open" aria-label="Open signing pad"><span>Tap to sign</span></button></div></div><div class="btn-row sig-tools"><button type="button" class="btn sm primary" data-action="sig-open" data-pad="${id}" data-testid="${testid}-sign">✍ Sign</button><button type="button" class="btn sm" data-action="sig-big" data-pad="${id}" data-testid="${testid}-big">⤢ Larger pad</button><button type="button" class="btn sm" data-action="pad-clear" data-pad="${id}" data-testid="${testid}-clear">✕ Clear</button></div><p class="tiny muted">The white box is the exact shape of the ${SIG_CELL.label}. Sign opens it at about two-thirds of your screen; Larger pad uses the full screen. The shape stays the same.</p>`;}
 function sigMetaOf(blobId){return (S.profile.sigMeta||{})[blobId]||null;}
 function setSigMeta(blobId,kind){S.profile.sigMeta=S.profile.sigMeta||{};const g=padGeom();S.profile.sigMeta[blobId]={w:g.w,h:g.h,inner:g.inner,kind};}
 /* Place a signature PNG at a PDF rect without distortion. Drawn pads: inner box maps to the rect (aspect kept, centred), margin overflows. Uploads/legacy: contain inside rect. */
@@ -476,6 +476,7 @@ function sigPlacement(rect,imgW,imgH,meta){
   if(meta&&meta.inner){const [ix,iy,iw,ih]=meta.inner;const sx=imgW/meta.w,sy=imgH/meta.h;const IW=iw*sx,IH=ih*sy,IX=ix*sx,IY=iy*sy;const s=Math.min(rect.width/IW,rect.height/IH);const ox=rect.x,oy=rect.y+(rect.height-IH*s)/2;return{x:ox-IX*s,y:oy-(imgH-IY-IH)*s,width:imgW*s,height:imgH*s,mode:"pad",scale:s};}
   const s=Math.min(rect.width/imgW,rect.height/imgH);const w=imgW*s,h=imgH*s;return{x:rect.x,y:rect.y+(rect.height-h)/2,width:w,height:h,mode:"contain",scale:s};}
 async function drawSigInRect(pdf,page,rect,blobId,png){const pl=sigPlacement(rect,png.width,png.height,sigMetaOf(blobId));page.drawImage(png,{x:pl.x,y:pl.y,width:pl.width,height:pl.height});(window.__sigPlacements=window.__sigPlacements||[]).push({rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},pl,imgW:png.width,imgH:png.height});return pl;}
+function openPadOverlay(id,size){const c=document.getElementById(id);const w=c&&c.closest(".sig-pad-wrap");if(!w)return;w.classList.add("big");w.classList.toggle("full",size==="full");w.classList.toggle("mid",size!=="full");w.classList.toggle("rot",window.innerHeight>window.innerWidth);document.body.classList.add("sig-big-on");const sb=w.querySelector("[data-action=sig-size]");if(sb)sb.textContent=size==="full"?"⤡ Smaller":"⤢ Larger";}
 function initSigPad(){["sig-pad","assessor-sig-pad"].forEach(id=>initOnePad(document.getElementById(id)));}
 function initOnePad(c){if(!c||c.dataset.init)return;c.dataset.init="1";const ctx=c.getContext("2d");ctx.lineWidth=3.2;ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle="#14324a";let drawing=false,last=null;
 const pos=e=>{const r=c.getBoundingClientRect();const w=c.closest(".sig-pad-wrap");if(w&&w.classList.contains("rot")){return{x:(e.clientY-r.top)*(c.width/r.height),y:(r.right-e.clientX)*(c.height/r.width)};}return{x:(e.clientX-r.left)*(c.width/r.width),y:(e.clientY-r.top)*(c.height/r.height)};};
@@ -879,8 +880,10 @@ else if(a==="do-fill"){await fillTemplate(ui.fillTpl.id);}
 else if(a==="fill-esign"){ui.fillSig=!ui.fillSig;render();}
 else if(a==="submission-preview-open"&&p){ui.subScope=el.dataset.act||null;await buildPdfPreview(ui.subScope,false);}
 else if(a==="criteria-preview"&&p){ui.subScope=null;await buildPdfPreview(null,"criteria");}
-else if(a==="sig-big"){const c=document.getElementById(el.dataset.pad);const w=c&&c.closest(".sig-pad-wrap");if(w){w.classList.add("big");const portrait=window.innerHeight>window.innerWidth;w.classList.toggle("rot",portrait);document.body.classList.add("sig-big-on");}}
-else if(a==="sig-big-off"){document.querySelectorAll(".sig-pad-wrap.big").forEach(w=>w.classList.remove("big","rot"));document.body.classList.remove("sig-big-on");}
+else if(a==="sig-open"||a==="sig-big"){openPadOverlay(el.dataset.pad,a==="sig-big"?"full":"mid");}
+else if(a==="sig-size"){const c=document.getElementById(el.dataset.pad);const w=c&&c.closest(".sig-pad-wrap");openPadOverlay(el.dataset.pad,w&&w.classList.contains("full")?"mid":"full");}
+else if(a==="pad-clear"){const c=document.getElementById(el.dataset.pad);if(c){c.getContext("2d").clearRect(0,0,c.width,c.height);delete c.dataset.dirty;}}
+else if(a==="sig-big-off"){document.querySelectorAll(".sig-pad-wrap.big").forEach(w=>w.classList.remove("big","rot","mid","full"));document.body.classList.remove("sig-big-on");}
 else if(a==="work-preview"&&p){ui.subScope=el.dataset.act||null;await buildPdfPreview(ui.subScope,true);}
 else if(a==="pdf-prev"&&ui.pdfPreview){ui.pdfPreview.idx=Math.max(0,ui.pdfPreview.idx-1);render();}
 else if(a==="pdf-next"&&ui.pdfPreview){ui.pdfPreview.idx=Math.min(ui.pdfPreview.pages.length-1,ui.pdfPreview.idx+1);render();}

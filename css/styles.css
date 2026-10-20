@@ -639,3 +639,14 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .sig-pad-wrap.big .sig-big-done{display:block;position:absolute;right:6px;bottom:-44px;z-index:2}
 .sig-pad-wrap.big{overflow:visible}
 .sig-pad-host{margin-inline:-17px}.sig-pad-host .sig-pad-wrap{border-radius:0}
+/* Beta v0.2.11: 2/3-screen default pad overlay, full-screen option, Clear everywhere */
+.sig-ov-bar{display:none}
+.sig-tap{position:absolute;inset:0;background:transparent;border:0;cursor:pointer;display:grid;place-items:end center;padding-bottom:2px;z-index:3}
+.sig-tap span{font-size:.7rem;color:#14324a;background:#fff;border-radius:999px;padding:1px 8px;opacity:.85}
+.sig-pad-wrap.big .sig-tap{display:none}
+.sig-pad-wrap.big.mid{width:66vw}
+.sig-pad-wrap.big.mid.rot{width:66vh}
+.sig-pad-wrap.big.full{width:96vw}
+.sig-pad-wrap.big.full.rot{width:90vh}
+.sig-pad-wrap.big .sig-ov-bar{display:flex;gap:8px;position:absolute;left:0;right:0;top:calc(100% + 10px);justify-content:center;z-index:2}
+.sig-pad-wrap.big .sig-ov-bar .btn{min-height:44px}
