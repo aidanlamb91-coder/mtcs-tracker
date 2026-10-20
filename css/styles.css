@@ -651,3 +651,6 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .sig-pad-wrap.big .sig-ov-bar{display:flex;gap:8px;position:absolute;left:0;right:0;top:calc(100% + 10px);justify-content:center;z-index:2}
 .sig-pad-wrap.big .sig-ov-bar .btn{min-height:44px}
 .sig-pad-wrap.big.full.rot{width:92vh}
+/* Beta v0.2.13 feedback */
+.ok-box{border:1px solid #a8dbb9;background:var(--signed-bg);color:var(--signed);border-radius:10px;padding:10px 12px;margin-top:10px}
+.fb-status{margin-top:10px}.fb-card textarea{width:100%;resize:vertical}
