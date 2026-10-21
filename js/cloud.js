@@ -163,7 +163,7 @@
         { method: existingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": "application/zip", "X-Upload-Content-Length": String(blob.size) },
           body: JSON.stringify(existingId ? { name: ZIP_NAME } : { name: ZIP_NAME, parents: [folderId], mimeType: "application/zip" }) }, "raw");
       const where = start.headers.get("Location"); if (!where) throw new Error("Google Drive did not return an upload address.");
-      const res = await fetch(where, { method: "PUT", headers: { "Content-Type": "application/zip" }, body: blob });
+      const res = await fetch(where, { method: "PUT", headers: { "Content-Type": "application/zip" }, body: await blob.arrayBuffer() }); /* v0.2.18 Safari: send bytes, not a Blob */
       if (!res.ok) throw new Error(cloudMessage(res.status, await res.text()));
       const j = await res.json(); return { size: Number(j.size) || blob.size, modified: Date.parse(j.modifiedTime) || Date.now() };
     },
@@ -179,11 +179,11 @@
     async read(id) { const meta = await api(GRAPH + "/me/drive/items/" + id + "?$select=id,@microsoft.graph.downloadUrl"); const res = await fetch(meta["@microsoft.graph.downloadUrl"]); if (!res.ok) throw new Error(cloudMessage(res.status, "")); return res.blob(); },
     async write(folderId, blob) {
       const path = GRAPH + "/me/drive/items/" + folderId + ":/" + encodeURIComponent(ZIP_NAME) + ":";
-      if (blob.size <= 4 * 1024 * 1024) { const j = await api(path + "/content", { method: "PUT", headers: { "Content-Type": "application/zip" }, body: blob }); return { size: j.size || blob.size, modified: Date.parse(j.lastModifiedDateTime) || Date.now() }; }
+      if (blob.size <= 4 * 1024 * 1024) { const j = await api(path + "/content", { method: "PUT", headers: { "Content-Type": "application/zip" }, body: await blob.arrayBuffer() }); /* v0.2.18 Safari: send bytes, not a Blob */ return { size: j.size || blob.size, modified: Date.parse(j.lastModifiedDateTime) || Date.now() }; }
       const sess = await api(path + "/createUploadSession", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item: { "@microsoft.graph.conflictBehavior": "replace" } }) });
       const CHUNK = 320 * 1024 * 16; let last = null;
       for (let off = 0; off < blob.size; off += CHUNK) { const end = Math.min(off + CHUNK, blob.size);
-        const res = await fetch(sess.uploadUrl, { method: "PUT", headers: { "Content-Range": "bytes " + off + "-" + (end - 1) + "/" + blob.size }, body: blob.slice(off, end) });
+        const res = await fetch(sess.uploadUrl, { method: "PUT", headers: { "Content-Range": "bytes " + off + "-" + (end - 1) + "/" + blob.size }, body: await blob.slice(off, end).arrayBuffer() });
         if (!res.ok && res.status !== 202) throw new Error(cloudMessage(res.status, await res.text())); last = res; }
       const j = last && (last.status === 200 || last.status === 201) ? await last.json() : {}; return { size: j.size || blob.size, modified: Date.parse(j.lastModifiedDateTime) || Date.now() };
     },

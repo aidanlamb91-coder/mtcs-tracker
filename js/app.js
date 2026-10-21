@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.17";
+const APP_VERSION="0.2.18";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -37,9 +37,11 @@ let db;
 function idbOpen(){return new Promise((res,rej)=>{const r=indexedDB.open("mtcs-tracker",1);r.onupgradeneeded=()=>{r.result.createObjectStore("kv");r.result.createObjectStore("blobs");};r.onsuccess=()=>{db=r.result;res();};r.onerror=()=>rej(r.error);});}
 function idb(store,mode,fn){return new Promise((res,rej)=>{const tx=db.transaction(store,mode);const req=fn(tx.objectStore(store));tx.oncomplete=()=>res(req&&req.result);tx.onerror=()=>rej(tx.error);if(req)req.onerror=()=>rej(req.error);});}
 const kvGet=k=>idb("kv","readonly",s=>s.get(k)), kvSet=(k,v)=>idb("kv","readwrite",s=>s.put(v,k));
-const blobGet=id=>idb("blobs","readonly",s=>s.get(id)), blobSet=(id,b)=>idb("blobs","readwrite",s=>s.put(b,id)), blobDel=id=>idb("blobs","readwrite",s=>s.delete(id)), blobKeys=()=>idb("blobs","readonly",s=>s.getAllKeys());
+/* v0.2.18 Safari/WebKit: IndexedDB can refuse Blob/File values ("Error preparing Blob/File data"), so blobs are stored as ArrayBuffer + type; older Blob records still read fine. */
+const blobGet=async id=>{const v=await idb("blobs","readonly",s=>s.get(id));if(v&&v.__mtcsAB instanceof ArrayBuffer){const o={type:v.type||""};return v.name?new File([v.__mtcsAB],v.name,o):new Blob([v.__mtcsAB],o);}return v;},
+ blobSet=async(id,b)=>{let v=b;if(b&&typeof b.arrayBuffer==="function"){v={__mtcsAB:await b.arrayBuffer(),type:b.type||""};if(b.name)v.name=b.name;}return idb("blobs","readwrite",s=>s.put(v,id));}, blobDel=id=>idb("blobs","readwrite",s=>s.delete(id)), blobKeys=()=>idb("blobs","readonly",s=>s.getAllKeys());
 async function sha256(blob){const buf=await blob.arrayBuffer();const h=await crypto.subtle.digest("SHA-256",buf);return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join("");}
-function downloadBlob(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);}
+function downloadBlob(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.rel="noopener";a.style.display="none";document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},60000);} /* v0.2.18 iOS: anchor in DOM, keep URL alive while Safari shows its download sheet */
 let S={portfolios:[],templates:[],packImports:[],shared:[],genPacks:[],profile:{name:"",signatureBlobId:null,signatureUpdatedAt:null},settings:{activeId:null,lastBackupAt:null,lastUsedCode:"O",lastWorkActivityId:null}};
 let lastSavedAt=null;
 function save(){lastSavedAt=new Date();if(!db)return;kvSet("portfolios",S.portfolios).catch(()=>{});kvSet("templates",S.templates).catch(()=>{});kvSet("packImports",S.packImports).catch(()=>{});kvSet("shared",S.shared).catch(()=>{});kvSet("genPacks",S.genPacks).catch(()=>{});kvSet("profile",S.profile).catch(()=>{});kvSet("settings",S.settings).catch(()=>{});kvSet("feedbackQueue",S.feedbackQueue||[]).catch(()=>{});const el=document.querySelector("[data-saved-ind]");if(el)el.textContent=savedText();}
@@ -1255,6 +1257,7 @@ document.addEventListener("touchend",e=>{if(!navSwipe)return;const t=e.changedTo
 if(page==="settings"||page==="profile"||page==="feedback"){if(dx>=70&&sx<=64)location.hash="#/more";return;}
 const cur={"":"",dashboard:"#/dashboard",work:"#/work",activities:"#/work",activity:"#/work",criteria:"#/criteria",matrix:"#/criteria",more:"#/more"}[page]||"";const idx=NAV_TABS.indexOf(cur);if(idx<0)return;const next=NAV_TABS[(idx+(dx<0?1:NAV_TABS.length-1))%NAV_TABS.length];location.hash=next;},{passive:true});
 (async function boot(){document.getElementById("app").innerHTML=`<div class="landing"><div class="card">Loading your portfolios from this browser…</div></div>`;
+try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persisted().then(x=>x||navigator.storage.persist()).catch(()=>{});}catch(_){} /* v0.2.18: ask for persistent storage (Safari 7-day eviction) */
 try{await idbOpen();S.portfolios=(await kvGet("portfolios"))||[];S.templates=(await kvGet("templates"))||[];S.packImports=(await kvGet("packImports"))||[];S.shared=(await kvGet("shared"))||[];S.genPacks=(await kvGet("genPacks"))||[];S.profile=Object.assign(S.profile,(await kvGet("profile"))||{});S.settings=Object.assign(S.settings,(await kvGet("settings"))||{});S.feedbackQueue=(await kvGet("feedbackQueue"))||[];setTimeout(()=>retryFeedbackQueue(false),1500);await cleanupPackData();cleanupPortfolioPeople();migrateLegacyPortfolios();if(S.profile.signatureBlobId){blobGet(S.profile.signatureBlobId).then(b=>{if(b){ui.sigUrl=URL.createObjectURL(b);render();}}).catch(()=>{});}}catch(e){console.error("IndexedDB unavailable",e);}
 render();cloudBoot();})();
 window.__mtcsQA={buildSubmissionPack,blobSet:(i,b)=>blobSet(i,b),signOffFieldNames,get S(){return S;},get ui(){return ui;},render:()=>render(),signedSignOffPairs:p=>signedSignOffPairs(p),active:()=>active(),get COMPS(){return COMPS;},get CRITS(){return CRITS;},fillFormForSubmission,blobGet,save:()=>save(),buildBackupBlob,planCritText,capFieldFont};
