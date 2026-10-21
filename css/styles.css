@@ -659,3 +659,24 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .upd-banner{position:fixed;left:10px;right:10px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:9999;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:12px;background:#0f2a3a;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:14px}
 .upd-banner .upd-btns{display:flex;gap:8px}
 .upd-banner .btn{min-height:36px}
+/* ===== v0.2.16 ===== */
+.top-more-btn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;color:#fff;text-decoration:none;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);border-radius:999px;padding:6px 12px;min-height:34px;font-size:.85rem}
+.top-more-btn:hover{background:rgba(255,255,255,.22)}
+.crit-act-field{margin:4px 0 10px}.crit-act-field select{width:100%;font-weight:600;font-size:1rem;padding:10px 12px;border:2px solid var(--brand,#0f5c6e);border-radius:12px;background:#fff}
+.cc-sub{position:relative;margin:10px 10px 6px;border:1px dashed #cfd8dc;border-radius:12px;background:#f7fafb;padding:0 10px 6px}
+.cc-sub>summary{list-style:none;cursor:pointer;padding:10px 120px 8px 0;display:flex;gap:8px;align-items:baseline}
+.cc-sub>summary::-webkit-details-marker{display:none}
+.cc-sub>summary::before{content:"▸";color:#789;font-size:.8rem}.cc-sub[open]>summary::before{content:"▾"}
+.cc-sub .cc-add{position:absolute;right:8px;top:6px}
+.cc-ev-list{list-style:none;margin:0;padding:0}.cc-ev-list li{display:flex;gap:8px;align-items:center;padding:7px 0;border-top:1px solid #e6ecef}
+.cc-ev-list .grow{display:flex;flex-direction:column;min-width:0}
+.linklike{background:none;border:0;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit}
+.cc-empty{margin:4px 0 6px}
+.ev-moved .port-row{gap:10px;align-items:center}
+.guide-sec>summary{cursor:pointer;padding:2px 0}.guide-body{margin-top:8px}.guide-body ul,.guide-body ol{padding-left:20px}
+.guide-fig{margin:12px 0 18px}.guide-fig img{max-width:100%;border:1px solid #dde4e8;border-radius:12px;display:block;margin-bottom:6px;background:#fff}
+.st-dot.warn{background:#f0a020;box-shadow:0 0 0 4px #fdeccc}
+.cloud-card .st-row{display:flex;gap:10px;align-items:center}
+.modal [data-cq-crit]{margin-right:4px}
+.guide-sec>summary{list-style:none}.guide-sec>summary::-webkit-details-marker{display:none}
+.guide-sec>summary::after{content:"▸";float:right;color:#789}.guide-sec[open]>summary::after{content:"▾"}
