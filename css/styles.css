@@ -721,3 +721,13 @@ details.ag-plan[open]>summary::after{content:"▴"}
 @supports (-webkit-touch-callout:none){input,select,textarea{font-size:16px!important}}
 .drawer{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
 @supports (height:100dvh){.sig-pad-wrap.big.rot{width:92dvh}}
+/* v0.2.20 batch 3 item 4: current bottom tab — filled teal pill behind the icon, bold teal label; others grey */
+@media (max-width:900px){.bottomnav a{position:relative;color:var(--muted)}.bottomnav a.active{color:var(--brand);font-weight:800}.bottomnav a.active::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:54px;height:30px;border-radius:999px;background:rgba(15,92,110,.18);z-index:-1}}
+/* item 3: small ring on each activity row (replaces the chevron) */
+.mring{--a:0;--b:0;width:38px;height:38px;border-radius:50%;flex:none;display:grid;place-items:center;background:conic-gradient(var(--signed) 0 calc(var(--a)*1%),var(--mapped-dot) 0 calc(var(--b)*1%),var(--gap-bg,#e3e8ec) 0)}
+.mring::after{content:attr(data-p);width:29px;height:29px;border-radius:50%;background:#fff;display:grid;place-items:center;font-size:.64rem;font-weight:700;color:var(--ink)}
+/* item 5: direct evidence bar grey below 70%, green at 70%+ */
+.meter.low{background:linear-gradient(90deg,#9aa5ad 0 var(--d),#e3e8ec var(--d) 100%)}
+.meter.ok{background:linear-gradient(90deg,var(--signed) 0 var(--d),#e3e8ec var(--d) 100%)}
+/* item 6: icon-only add button */
+.btn.icon-btn{width:34px;min-width:34px;padding:0;font-size:1.25rem;font-weight:800;line-height:1;display:inline-grid;place-items:center}

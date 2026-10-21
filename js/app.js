@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.19";
+const APP_VERSION="0.2.20";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -15,7 +15,9 @@ function refreshCriteria(){const gp=genPackOf(active());COMPS=[];CRITS=[];if(!gp
 (gp.units||[]).forEach(u=>(u.competences||[]).forEach(c=>{const comp=Object.assign({},c,{unitId:u.id,unitName:u.name,unitShort:u.short||(u.id==="core"?"Core":"Role")});COMPS.push(comp);(c.criteria||[]).forEach(k=>CRITS.push(Object.assign({},k,{comp})));}));}
 const hasPack=p=>!!genPackOf(p);
 const critById=id=>CRITS.find(c=>c.id===id);
-const compLabel=c=>(c.unitId==="core"?"Core ":(c.unitShort||"Role "))+(/\s$/.test(c.unitId==="core"?"Core ":(c.unitShort||"Role "))?"":" ")+c.number;
+/* v0.2.20 item 7: route prefixes — one word: first letter (Surveyor S1); two words: initials (Data Processor DP1, Survey Engineer SE1, Party Chief PC1); Client Rep: Cli1. */
+function routeAbbr(name){const n=String(name||"").trim();if(!n)return "R";if(/^client/i.test(n))return "Cli";const w=n.split(/\s+/).filter(x=>/^[a-z]/i.test(x));if(!w.length)return "R";return w.length===1?w[0][0].toUpperCase():w.slice(0,3).map(x=>x[0].toUpperCase()).join("");}
+const compLabel=c=>c.unitId==="core"?"Core "+c.number:routeAbbr(c.unitShort)+c.number;
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const uid=p=>(p||"id")+"-"+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const todayISO=()=>new Date().toISOString().slice(0,10);
@@ -48,6 +50,8 @@ function save(){lastSavedAt=new Date();if(!db)return;kvSet("portfolios",S.portfo
 const savedText=()=>lastSavedAt?("Saved ✓ "+lastSavedAt.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})):"";
 const savedInd=()=>`<span class="saved-ind" data-saved-ind data-testid="saved-ind">${savedText()}</span>`;
 const active=()=>S.portfolios.find(p=>p.id===S.settings.activeId)||null;
+/* v0.2.20: candidate signature is kept per portfolio (falls back to the old Profile store when no portfolio is open). */
+const CS=()=>active()||S.profile;
 const ui={openComps:new Set(),role:null,grade:"G2",mState:"Gap",mSearch:"",drawerCrit:null,critNavList:[],critNavLocked:false,drawerAct:null,drawerFromList:false,pendingSigned:null,critScope:"all",selectMode:false,selCrit:new Set(),bulkStatus:"Evidenced",bulkCode:"O",bulkAct:null,evSeg:"inbox",evSearch:"",evEditId:null,pickerSearch:"",pickerFor:null,captureBatch:[],captureLinks:{},batchStatus:"Evidenced",batchCode:"O",formsSearch:"",formsAct:null,preflightAct:null,planOpen:false,packProgress:null,formsSetupFor:null,pendingParse:[],genReview:null,fillSig:false,sigUrl:null,planBuilder:null,planSearch:"",preview:null,modal:null,pendingBackup:null,pendingReturn:null,fillTpl:null,toast:"",toastUndo:false,pdfPreview:null,assessorFlow:null,subScope:null};
 let undoStack=[];
 let deferredInstall=null;
@@ -84,12 +88,20 @@ if("serviceWorker" in navigator&&/^https?:$/.test(location.protocol)){window.add
     setInterval(()=>{if(UPD.waiting&&!UPD.later)updShow();},1500);
   }catch(err){console.warn("SW failed",err);}});}
 function newActivity(n){return{id:String(n),n,title:"Activity "+n,planCritIds:[],dates:"",summary:"",where:"",witness:"",assessorName:"",planText:"",feedbackText:"",candidateComments:"",status:"Gathering evidence",planAgreed:"",signedOn:"",exportSeq:0,version:1,versions:[],ukq:[{q:"",a:"",ok:""}],assessorSig:null,candidateSignedAt:null,sigAudit:[],signOffSelections:[]};}
-function newPortfolio(name,roleKey,grade,assessedBy){const role=ROLES.find(r=>r.key===roleKey);return{id:uid("pf"),name,roleKey,role:role.name,grade,assessedBy:assessedBy||"",genPackId:null,routeLabel:grade+" "+role.name+(coreLabelForGrade(grade)?" + "+coreLabelForGrade(grade):""),formsPromptSeen:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),activities:[newActivity(1),newActivity(2),newActivity(3)],criteria:{},evidence:[]};}
+function newPortfolio(name,roleKey,grade,assessedBy){const role=ROLES.find(r=>r.key===roleKey);return{id:uid("pf"),name,roleKey,role:role.name,grade,assessedBy:assessedBy||"",genPackId:null,routeLabel:grade+" "+role.name+(coreLabelForGrade(grade)?" + "+coreLabelForGrade(grade):""),formsPromptSeen:false,signatureBlobId:null,signatureUpdatedAt:null,witnesses:[],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),activities:[newActivity(1),newActivity(2),newActivity(3)],criteria:{},evidence:[]};}
 const actOf=(p,id)=>p.activities.find(a=>a.id===String(id));
 const cov=(p,crit,act)=>(p.criteria[crit]||{})[String(act)]||{status:"Gap",code:""};
-function critOverall(p,id){let best="Gap";const rank={Gap:0,Planned:1,Evidenced:2,Signed:3};p.activities.forEach(a=>{const c=cov(p,id,a.id);if(rank[c.status]>rank[best])best=c.status;});return best;}
-function totals(p){const t={Signed:0,Evidenced:0,Planned:0,Gap:0,direct:0,coded:0};CRITS.forEach(k=>t[critOverall(p,k.id)]++);Object.values(p.criteria).forEach(by=>Object.values(by).forEach(c=>{if(c.code){t.coded++;if(c.code==="O"||c.code==="P")t.direct++;}}));t.directPct=t.coded?Math.round(100*t.direct/t.coded):0;return t;}
-const evLinkedCrit=(p,critId)=>p.evidence.filter(e=>e.criteria.includes(critId));
+function critOverall(p,id){let best="Gap";const rank={Gap:0,Planned:1,Evidenced:2,Signed:3};p.activities.forEach(a=>{const st=effStatus(cov(p,id,a.id));if(rank[st]>rank[best])best=st;});return best;}
+function totals(p){const t={Signed:0,Evidenced:0,Planned:0,Gap:0,direct:0,coded:0};CRITS.forEach(k=>t[critOverall(p,k.id)]++);{const d=portfolioDirect(p.criteria);t.coded=d.coded;t.direct=d.direct;t.directPct=d.pct;}return t;}
+/* v0.2.20: a quick-note placeholder is not a real evidence file. */
+const isPlaceholderEv=e=>!!(e&&(e.placeholder||(e.fileName==="quick-note.txt"&&e.title==="Quick note"&&(e.size||0)<300)));
+const evLinkedCrit=(p,critId)=>p.evidence.filter(e=>e.criteria.includes(critId)&&!isPlaceholderEv(e));
+const REAL_CODES=["O","P","W","Q"];
+/* v0.2.20 one rule: Evidenced needs a real code (O/P/W/Q); N/C, N/A or no code never count as done. */
+const effStatus=c=>c&&c.status==="Evidenced"&&!REAL_CODES.includes(c.code)?"Planned":(c?c.status:"Gap");
+const covDone=(p,crit,act)=>{const c=cov(p,crit,act);const st=effStatus(c);if(st==="Signed")return true;if(st!=="Evidenced")return false;if(["P","W"].includes(c.code)&&!evLinkedCrit(p,crit).length)return false;return true;};
+function directStats(entries){/* entries: [{status,code}] — only Evidenced/Signed with O/P/W/Q count */const ok=entries.filter(c=>["Evidenced","Signed"].includes(effStatus(c))&&REAL_CODES.includes(c.code));const d=ok.filter(c=>c.code==="O"||c.code==="P").length;return{coded:ok.length,direct:d,pct:ok.length?Math.round(100*d/ok.length):0};}
+function portfolioDirect(crit,acts){let coded=0,direct=0;Object.values(crit).forEach(by=>{const es=Object.values(by||{}).filter(Boolean);const st=directStats(es);if(st.coded){coded++;if(st.direct)direct++;}});return{coded,direct,pct:coded?Math.round(100*direct/coded):0};}
 const ATTACH_CODES=["P","W"];
 const qLinked=(p,crit,act)=>{const a=actOf(p,act);return !!(a&&(a.ukq||[]).some(u=>String(u.q||"").trim()&&(u.crits||[]).includes(crit)));};
 /* Derived (never stored): "attach" = Evidenced P/W with no linked evidence file; "question" = Evidenced Q with no linked Knowledge question in that activity. */
@@ -112,7 +124,7 @@ function fileDateISO(f){try{const d=new Date(f.lastModified);return isNaN(d)?tod
 async function maybeCompressImage(file){if(!file.type||!file.type.startsWith("image/")||file.type==="image/png"&&file.size<400000)return file;try{const bmp=await createImageBitmap(file);const scale=Math.min(1,1600/Math.max(bmp.width,bmp.height));if(scale>=1&&file.size<800000)return file;const c=document.createElement("canvas");c.width=Math.round(bmp.width*scale);c.height=Math.round(bmp.height*scale);c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",0.82));if(blob&&blob.size<file.size)return new File([blob],file.name.replace(/\.[^.]+$/,"")+".jpg",{type:"image/jpeg",lastModified:file.lastModified});}catch(_){}return file;}
 function actUnfinished(p,a){const entries=Object.values(p.criteria).map(by=>by[a.id]).filter(Boolean);const planned=entries.filter(c=>c.status!=="Gap");if(!a.summary||!planned.length)return true;if(planned.some(c=>c.status!=="Signed"))return true;if(p.evidence.some(e=>String(e.activityId)===String(a.id)&&!e.criteria.length))return true;return false;}
 function workActId(p){const last=p.activities.find(a=>String(a.id)===String(S.settings.lastWorkActivityId));if(last&&actUnfinished(p,last))return last.id;const first=p.activities.find(a=>actUnfinished(p,a));return first?first.id:(p.activities[0]&&p.activities[0].id);}
-function projectedDirect(p,ids,actId,status,code){const crit=JSON.parse(JSON.stringify(p.criteria));ids.forEach(id=>{crit[id]=crit[id]||{};crit[id][String(actId)]={status,code};});let coded=0,direct=0;Object.values(crit).forEach(by=>Object.values(by).forEach(c=>{if(c.code){coded++;if(c.code==="O"||c.code==="P")direct++;}}));return coded?Math.round(100*direct/coded):0;}
+function projectedDirect(p,ids,actId,status,code){const crit=JSON.parse(JSON.stringify(p.criteria));ids.forEach(id=>{crit[id]=crit[id]||{};crit[id][String(actId)]={status,code};});return portfolioDirect(crit).pct;}
 function bulkBarHTML(){const p=active();if(!p||!ui.selectMode||!ui.selCrit.size||ui.drawerCrit)return"";const actId=ui.bulkAct||(ui.critScope!=="all"?ui.critScope:workActId(p));const ids=[...ui.selCrit];const after=projectedDirect(p,ids,actId,ui.bulkStatus,ui.bulkCode);const counts={};ids.forEach(id=>{const s=critOverall(p,id);counts[s]=(counts[s]||0)+1;});
 return `<div class="bulkbar" data-testid="bulk-bar"><div class="bulk-top"><b>${ids.length} selected</b><span class="small">${Object.entries(counts).map(([k,v])=>v+" "+k).join(" · ")}</span><button class="btn sm ghost" data-action="bulk-clear">Clear</button></div><div class="chiprow" role="group" aria-label="Bulk status">${["Gap","Planned","Evidenced","Signed"].map(s=>`<button class="segchip ${ui.bulkStatus===s?"on":""}" data-bulk-status="${s}">${s}</button>`).join("")}</div><div class="chiprow" role="group" aria-label="Bulk code">${CODES.map(c=>`<button class="segchip ${ui.bulkCode===c?"on":""}" data-bulk-code="${c}">${c}</button>`).join("")}<select data-bulk-act aria-label="Activity">${p.activities.map(a=>`<option value="${a.id}" ${String(actId)===String(a.id)?"selected":""}>Activity ${a.n}</option>`).join("")}</select></div><div class="small ${after<70?"bulk-warn":""}" data-bulk-preview>After applying ${ui.bulkStatus}/${ui.bulkCode} in Activity ${(actOf(p,actId)||{}).n||""}: direct evidence ${after}%${after<70?" — below the 70% guide. This mix would pull direct evidence down.":" ✓ (70% guide)"}</div><button class="btn primary block" data-action="bulk-apply" data-testid="bulk-apply">Apply to ${ids.length}</button></div>`;}
 function packStatus(k){return S.packImports.filter(i=>i.packKey===k).sort((a,b)=>b.importedAt.localeCompare(a.importedAt))[0]||null;}
@@ -167,14 +179,17 @@ return `<div class="act-rings" data-testid="act-rings">${acts.map(a=>{const ks=i
 const coded=st.filter(c=>c.code&&c.status!=="Gap"),dp=coded.length?Math.round(100*coded.filter(c=>["O","P"].includes(c.code)).length/coded.length):0;
 const only=ks.filter(k=>!p.activities.some(o=>o.id!==a.id&&cov(p,k.id,o.id).status!=="Gap")).length;const pc=v=>n?100*v/n:0;
 return `<a class="act-ring" href="#/activity/${a.id}" data-testid="act-ring-${a.n}"><span class="ring sm" style="--v:${pc(sg)};--w:${pc(sg+ev)};--x:${n?100:0}" data-label="A${a.n}"></span><span class="ar-txt"><b>Activity ${a.n}</b><span class="tiny">${n} criteria · ${sg} signed · ${ev} evidenced · ${pl} planned</span><span class="tiny">Direct ${dp}%</span><span class="tiny" data-testid="act-ring-only">${only} only here</span></span></a>`;}).join("")}</div><p class="tiny muted" data-testid="act-rings-note">Each small ring shows that activity's own criteria. They won't add up to the main ring, because one criterion can be covered by more than one activity.</p>`;}
+/* v0.2.20 batch 3 item 3: small ring on each activity row — % of that activity's planned criteria Evidenced or Signed (0% if none planned). */
+function actRowPct(p,a){const ks=planCritOf(p,a);if(!ks.length)return{pct:0,sg:0,ev:0};const sg=ks.filter(k=>cov(p,k.id,a.id).status==="Signed").length;const done=ks.filter(k=>covDone(p,k.id,a.id)).length;return{pct:Math.round(100*done/ks.length),sg:100*sg/ks.length,ev:100*(done-sg)/ks.length};}
+function actRowRing(p,a){const r=actRowPct(p,a);return `<span class="mring" data-testid="act-row-ring-${a.n}" style="--a:${r.sg};--b:${r.sg+r.ev}" data-p="${r.pct}%" role="img" aria-label="Activity ${a.n}: ${r.pct}% of planned criteria evidenced or signed"></span>`;}
 function viewDashboard(){const p=active();if(!p){location.hash="#/";return"";}const t=totals(p);
 return shell("Dashboard",`<div class="dash-head"><a class="ctx-chip" href="#/more"><b>${esc(p.name)}</b><span>${esc(p.routeLabel)}</span></a><div class="actions"><button class="btn" data-action="export-backup" data-testid="dash-backup">Back up now</button></div></div>
 ${hasPack(p)?"":`<section class="card" data-testid="criteria-locked"><h2>Build your criteria list</h2><div class="btn-row"><a class="btn primary" href="#/forms">Get my forms pack</a></div></section>`}
 <section class="card next-card"><div class="card-head"><h2>What's next</h2></div><div class="next-list" data-testid="whats-next">${whatsNext(p).map(i=>`<a class="next-row" href="${i.href}"><span class="dot" style="background:${i.dot}"></span><span class="grow">${esc(i.text)}</span><span class="chev">›</span></a>`).join("")}</div></section>
-${hasPack(p)?`<section class="card"><div class="card-head"><h2>Readiness</h2><span class="right small muted">${CRITS.length} criteria</span></div><div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"><div class="ring" style="--v:${CRITS.length?100*t.Signed/CRITS.length:0};--w:${CRITS.length?100*(t.Signed+t.Evidenced)/CRITS.length:0};--x:${CRITS.length?100*(t.Signed+t.Evidenced+t.Planned)/CRITS.length:0}" data-label="${t.Signed} signed\n${t.Gap} gaps"></div><div class="grow"><div class="stat-line"><span class="sw signed"></span>Signed <b>${t.Signed}</b></div><div class="stat-line"><span class="sw mapped"></span>Evidenced <b>${t.Evidenced}</b>${(()=>{const n=awaitingIds(p).length;const ids=awaitingIds(p),a=ids.filter(id=>critFlags(p,id).includes("attach")).length,q=ids.filter(id=>critFlags(p,id).includes("question")).length;return n?` <span class="small await-txt" data-testid="legend-awaiting">(${[a?a+" awaiting attachment":"",q?q+" awaiting question link":""].filter(Boolean).join(", ")})</span>`:"";})()}</div><div class="stat-line"><span class="sw planned"></span>Planned <b>${t.Planned}</b></div><div class="stat-line"><span class="sw gap"></span>Gap <b>${t.Gap}</b></div><p class="small muted" style="margin-top:10px">Direct evidence (O/P): <b>${t.directPct}%</b> of coded criteria (70% minimum guide).</p><div class="meter" style="--d:${t.directPct}%"><span class="mark"></span></div></div></div>${actRingsHTML(p)}</section>`:""}
-<h2 class="sec-h">Work</h2><div class="stack">${p.activities.map(a=>`<a class="act-card" href="#/activity/${a.id}"><span class="num">${a.n}</span><span class="grow"><b>${esc(a.title)}</b><span class="small muted" style="display:block">${esc(a.dates||"No dates yet")} · ${esc(a.status)}</span></span><span class="chev">›</span></a>`).join("")}</div>`,"dashboard");}
+${hasPack(p)?`<section class="card"><div class="card-head"><h2>Readiness</h2><span class="right small muted">${CRITS.length} criteria</span></div><div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"><div class="ring" style="--v:${CRITS.length?100*t.Signed/CRITS.length:0};--w:${CRITS.length?100*(t.Signed+t.Evidenced)/CRITS.length:0};--x:${CRITS.length?100*(t.Signed+t.Evidenced+t.Planned)/CRITS.length:0}" data-label="${t.Signed} signed\n${t.Gap} gaps"></div><div class="grow"><div class="stat-line"><span class="sw signed"></span>Signed <b>${t.Signed}</b></div><div class="stat-line"><span class="sw mapped"></span>Evidenced <b>${t.Evidenced}</b>${(()=>{const n=awaitingIds(p).length;const ids=awaitingIds(p),a=ids.filter(id=>critFlags(p,id).includes("attach")).length,q=ids.filter(id=>critFlags(p,id).includes("question")).length;return n?` <span class="small await-txt" data-testid="legend-awaiting">(${[a?a+" awaiting attachment":"",q?q+" awaiting question link":""].filter(Boolean).join(", ")})</span>`:"";})()}</div><div class="stat-line"><span class="sw planned"></span>Planned <b>${t.Planned}</b></div><div class="stat-line"><span class="sw gap"></span>Gap <b>${t.Gap}</b></div><p class="small muted" style="margin-top:10px">Direct evidence (O/P): <b>${t.directPct}%</b> of coded criteria (70% minimum guide).</p><div class="meter ${t.directPct>=70?"ok":"low"}" data-testid="direct-meter" style="--d:${t.directPct}%"><span class="mark"></span></div></div></div></section>`:""}
+<h2 class="sec-h">Work</h2><div class="stack">${p.activities.map(a=>`<a class="act-card" href="#/activity/${a.id}"><span class="num">${a.n}</span><span class="grow"><b>${esc(a.title)}</b><span class="small muted" style="display:block">${esc(a.dates||"No dates yet")} · ${esc(a.status)}</span></span>${actRowRing(p,a)}</a>`).join("")}</div>`,"dashboard");}
 function viewActivities(){const p=active();if(!p){location.hash="#/";return"";}
-return shell("Work",`<div class="page-head"><div><div class="crumb">Portfolio</div><h1>Work</h1></div><div class="actions"><button class="btn" data-action="add-activity" data-testid="add-activity">+ Add activity</button></div></div><div class="stack">${p.activities.map(a=>{const cnt=CRITS.filter(k=>cov(p,k.id,a.id).status!=="Gap").length;return `<a class="act-card" href="#/activity/${a.id}"><span class="num">${a.n}</span><span class="grow"><b>${esc(a.title)}</b><span class="small muted" style="display:block">${esc(a.dates||"No dates")} · ${cnt} criteria in plan · ${esc(a.status)}</span></span><span class="chev">›</span></a>`;}).join("")}</div>`,"activities");}
+return shell("Work",`<div class="page-head"><div><div class="crumb">Portfolio</div><h1>Work</h1></div><div class="actions"><button class="btn" data-action="add-activity" data-testid="add-activity">+ Add activity</button></div></div><div class="stack">${p.activities.map(a=>{const cnt=CRITS.filter(k=>cov(p,k.id,a.id).status!=="Gap").length;return `<a class="act-card" href="#/activity/${a.id}"><span class="num">${a.n}</span><span class="grow"><b>${esc(a.title)}</b><span class="small muted" style="display:block">${esc(a.dates||"No dates")} · ${cnt} criteria in plan · ${esc(a.status)}</span></span>${actRowRing(p,a)}</a>`;}).join("")}</div>`,"activities");}
 function evRow(p,e){const sug=!e.criteria.length?suggestCriteria(e.fileName+" "+e.title):[];return `<li class="${e.criteria.length?"":"unmapped"}" style="align-items:center"><span class="ev-ico">${e.mime&&e.mime.startsWith("image/")?"📷":"📄"}</span><div class="grow"><b class="small">${esc(e.title)}</b>${e.redact?` <span class="pill warn">Check for client data</span>`:""}<div class="fname">${esc(e.fileName)} · ${(e.size/1024).toFixed(1)} KB · ${esc(e.date||"")}</div><div>${e.criteria.map(c=>`<button class="ev-chip" data-action="open-crit" data-crit="${c}">${c}</button>`).join("")||`<span class="pill gap" style="margin-top:6px">Unmapped</span>`}</div>
 ${sug.length?`<div class="small muted" style="margin-top:4px">Guess — check before linking: ${sug.map(id=>`<button class="ev-chip suggest" data-action="accept-suggest" data-id="${e.id}" data-crit="${id}">${id} +</button>`).join("")}</div>`:""}</div>
 <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end"><button class="btn sm" data-action="preview-ev" data-id="${e.id}" data-testid="preview-ev">Preview</button><button class="btn sm" data-action="ev-edit" data-id="${e.id}" data-testid="ev-edit">Edit</button><button class="btn sm" data-action="download-ev" data-id="${e.id}">Download</button><button class="btn sm ghost" data-action="delete-ev" data-id="${e.id}">Delete</button></div></li>`;}
@@ -198,18 +213,18 @@ let a=id?actOf(p,id):null;if(!a){a=actOf(p,workActId(p))||p.activities[0];}if(!a
 S.settings.lastWorkActivityId=a.id;save();
 if(params&&params.get("c")){ui.drawerCrit=params.get("c");ui.drawerAct=a.id;ui.drawerFromList=true;}
 const ev=p.evidence.filter(e=>String(e.activityId)===String(a.id)), planIds=new Set(a.planCritIds||[]), planned=CRITS.filter(k=>planIds.has(k.id));
-const entries=planned.map(k=>cov(p,k.id,a.id)), doneCt=entries.filter(c=>["Evidenced","Signed"].includes(c.status)).length;
-const actCoded=entries.filter(c=>c.code), actDirect=actCoded.length?Math.round(100*actCoded.filter(c=>["O","P"].includes(c.code)).length/actCoded.length):0;
+const entries=planned.map(k=>cov(p,k.id,a.id)), doneCt=planned.filter(k=>covDone(p,k.id,a.id)).length;
+const _ds=directStats(entries), actCoded={length:_ds.coded}, actDirect=_ds.pct;
 const unmappedEv=ev.filter(e=>!e.criteria.length);
-const groups=COMPS.map(c=>{const ks=c.criteria.filter(k=>planIds.has(k.id));if(!ks.length)return"";return `<div class="crit-group"><div class="cg-head">${compLabel(c)} <span class="muted small">${esc(c.title)}</span></div>${ks.map(k=>{const cv=cov(p,k.id,a.id);return `<div class="crit-line">${ui.selectMode?`<input type="checkbox" class="selbox" data-sel-crit="${k.id}" ${ui.selCrit.has(k.id)?"checked":""} aria-label="Select ${k.id}">`:""}<a class="crit-line-main" href="#/activity/${a.id}?c=${k.id}"><span class="mcell ${stClass(cv.status)}">${esc(cv.code||"—")}</span><span class="crit-id">${k.id}</span><span class="cl-text">${esc(k.text)}</span>${pill(cv.status)}</a></div>`;}).join("")}</div>`;}).join("");
+const groups=COMPS.map(c=>{const ks=c.criteria.filter(k=>planIds.has(k.id));if(!ks.length)return"";return `<div class="crit-group"><div class="cg-head">${compLabel(c)} <span class="muted small">${esc(c.title)}</span></div>${ks.map(k=>{const cv=cov(p,k.id,a.id);return `<div class="crit-line"><a class="crit-line-main" href="#/activity/${a.id}?c=${k.id}"><span class="mcell ${stClass(cv.status)}">${esc(cv.code||"—")}</span><span class="crit-id">${k.id}</span><span class="cl-text">${esc(k.text)}</span>${pill(cv.status)}</a></div>`;}).join("")}</div>`;}).join("");
 const planFilled=!!(a.summary||a.dates||a.where);
-const planBody=(planFilled&&!ui.planOpen)?`<div class="plan-oneline"><span class="grow"><b>${esc(a.summary||a.title)}</b><span class="small muted" style="display:block">${esc(a.dates||"")} ${a.where?"· "+esc(a.where):""} · Witness: ${esc(a.witness||"—")} · Assessor: ${esc(a.assessorName||"—")}</span></span><button class="btn sm" data-action="plan-edit">Edit plan</button></div>`
+const planBody=(planFilled&&!ui.planOpen)?`<div class="plan-oneline"><span class="grow"><b>${esc(a.summary||a.title)}</b><span class="small muted" style="display:block">${esc(a.dates||"")} ${a.where?"· "+esc(a.where):""} · Witness: ${esc((actWitness(p,a)||{}).name||"—")} · Assessor: ${esc(a.assessorName||"—")}</span></span><button class="btn sm" data-action="plan-edit">Edit plan</button></div>`
 :`<form data-form="activity-edit" data-act="${a.id}">
 <div class="field"><label>Work activity summary</label><textarea name="summary" data-afield="summary" data-act="${a.id}" data-testid="act-summary">${esc(a.summary)}</textarea></div>
 <div class="field"><label>Dates</label><input name="dates" data-afield="dates" data-act="${a.id}" value="${esc(a.dates)}"></div>
 <div class="field"><label>Where</label><input name="where" data-afield="where" data-act="${a.id}" value="${esc(a.where)}"></div>
 <div class="field"><label>Assessor name (this activity only)</label><input name="assessorName" data-afield="assessorName" data-act="${a.id}" value="${esc(a.assessorName)}" placeholder="Assessor for this activity"></div>
-<div class="field"><label>Witness name (this activity only)</label><input name="witness" data-afield="witness" data-act="${a.id}" value="${esc(a.witness)}" placeholder="Witness for this activity"></div>
+<div class="field"><label>Witness (this activity)</label>${witnessSelectHTML(p,a)}<span class="tiny muted">Add or edit witness details in the Witness card below.</span></div>
 <div class="field"><label>Plan notes</label><textarea name="planText" data-afield="planText" data-act="${a.id}">${esc(a.planText)}</textarea></div>
 <div class="btn-row"><button class="btn primary sm" type="submit" data-testid="save-activity">Save activity</button></div></form>`;
 const prevAct=p.activities.filter(x=>x.n<a.n).slice(-1)[0];
@@ -219,8 +234,9 @@ ${unmappedEv.length?`<div class="next-step"><b>Next step</b><span>${unmappedEv.l
 ${a.copiedUnconfirmed?`<div class="warn-box" data-testid="copied-flag"><b>Copied from Activity ${a.copiedFrom} — check dates, place and people</b><div class="btn-row"><button class="btn sm primary" data-action="confirm-copied" data-act="${a.id}">I've checked this plan</button></div></div>`:""}
 <div class="btn-row"><a class="btn" href="#/assessor/${a.id}">Preview assessor view</a>${prevAct&&!planFilled?`<button class="btn" data-action="copy-plan" data-act="${a.id}" data-from="${prevAct.id}" data-testid="copy-plan">Copy plan from Activity ${prevAct.n}</button>`:""}</div></section>
 <section class="card"><div class="card-head"><h2>Assessment plan</h2>${savedInd()}</div>${planBody}</section>
-<section class="card"><div class="card-head"><h2>Assessment plan — criteria covered</h2><span class="right" style="display:flex;gap:6px"><button class="btn sm primary" data-action="plan-builder-open" data-act="${a.id}" data-testid="plan-builder-open">+ Add competencies</button><button class="btn sm ${ui.selectMode?"primary":""}" data-action="toggle-select" data-testid="toggle-select">${ui.selectMode?"Selecting…":"Select"}</button></span></div>
-${groups||`<p class="small muted">No competences in this plan yet. Tap <b>+ Add competencies</b>.</p>`}</section>
+<section class="card" data-testid="criteria-covered-card"><div class="card-head"><h2>Criteria Covered</h2><span class="right" style="display:flex;gap:6px"><button class="btn sm primary icon-btn" data-action="plan-builder-open" data-act="${a.id}" data-testid="plan-builder-open" aria-label="Add competencies" title="Add competencies">+</button></span></div>
+${groups||`<p class="small muted">No competences in this plan yet. Tap <b>+</b> to add competencies.</p>`}</section>
+${witnessCardHTML(p,a)}
 <section class="card" data-testid="banner-knowledge"><div class="card-head"><h2>Knowledge questions</h2>${savedInd()}</div>
 <form data-form="activity-edit" data-act="${a.id}">
 ${a.ukq.map((u,i)=>ukqRowHTML(a,u,i)).join("")}
@@ -232,13 +248,28 @@ ${a.ukq.map((u,i)=>ukqRowHTML(a,u,i)).join("")}
 <div class="btn-row"><button class="btn primary sm" type="submit">Save</button></div></form></section>
 <section class="card" data-testid="sign-card"><div class="card-head"><h2>Signatures &amp; forms preview</h2></div>
 <p class="small muted">${SIG_NOTE}. Candidate signing uses your Profile signature only when you tap it; nothing is auto-signed.</p>
-<div class="share-block"><b>Candidate signature</b><p class="small muted">${S.profile.signatureBlobId?"Profile signature saved on this device.":"No Profile signature yet \u2014 add one in More \u2192 Profile."}</p>${a.candidateSignedAt?`<p class="small" data-testid="candidate-signed">\u2713 You signed this activity on ${fmtDate(a.candidateSignedAt)} <button class="btn sm ghost" data-action="candidate-unsign" data-act="${a.id}">Undo sign</button></p>`:S.profile.signatureBlobId?`<div class="btn-row"><button class="btn primary" data-action="candidate-sign" data-act="${a.id}" data-testid="candidate-sign">Add my e-signature to this activity</button></div>`:`<div class="btn-row"><a class="btn" href="#/profile">Go to Profile signature</a></div>`}</div>
+<div class="share-block"><b>Candidate signature</b><p class="small muted">${CS().signatureBlobId?"Profile signature saved on this device.":"No Profile signature yet \u2014 add one in More \u2192 Profile."}</p>${a.candidateSignedAt?`<p class="small" data-testid="candidate-signed">\u2713 You signed this activity on ${fmtDate(a.candidateSignedAt)} <button class="btn sm ghost" data-action="candidate-unsign" data-act="${a.id}">Undo sign</button></p>`:CS().signatureBlobId?`<div class="btn-row"><button class="btn primary" data-action="candidate-sign" data-act="${a.id}" data-testid="candidate-sign">Add my e-signature to this activity</button></div>`:`<div class="btn-row"><a class="btn" href="#/profile">Go to Profile signature</a></div>`}</div>
 <div class="share-block"><b>Assessor signature</b>${a.assessorSig?`<p class="small" data-testid="assessor-signed">\u2713 Signed by ${esc(a.assessorSig.name||a.assessorName||"Assessor")} on ${fmtDate(a.assessorSig.signedAt)} (${esc(a.assessorSig.source||"drawn")})</p><div class="btn-row"><button class="btn" data-action="assessor-sign-open" data-act="${a.id}" data-testid="assessor-sign-open">Assessor sign-off</button></div>`:`<p class="small muted">Not signed yet.</p><div class="btn-row"><button class="btn primary" data-action="assessor-sign-open" data-act="${a.id}" data-testid="assessor-sign-open">Assessor sign-off</button></div>`}</div>
 ${(a.assessorSig||(a.signOffSelections||[]).length||CRITS.some(k=>cov(p,k.id,a.id).status==="Signed"))?`<div class="share-block"><b>Unsign</b><p class="small muted">Reverses the assessor sign-off for this activity: signed criteria go back to Evidenced (evidence and links kept) and the assessor signature and date come off the sign-off sheet.</p><div class="btn-row"><button class="btn" data-action="unsign-act-open" data-act="${a.id}" data-testid="unsign-act">Unsign activity</button></div></div>`:""}
 <div class="btn-row"><button class="btn" data-action="work-preview" data-act="${a.id}" data-testid="preview-forms">Preview</button><button class="btn" data-action="submission-export" data-act="${a.id}">Download this activity\u2019s submission forms+evidence</button></div></section>
 <section class="card send-end-card"><div class="send-row"><button class="btn send-preview-btn" data-action="work-preview" data-act="${a.id}" data-testid="work-preview">Preview</button><button class="btn primary send-end-btn" data-action="send-preflight" data-act="${a.id}" data-testid="send-btn">Send\u2026</button></div><p class="tiny muted" style="margin-top:8px">Preview shows the filled Assessment plan, Feedback form, Assessor sign-off and Knowledge questions for this activity exactly as they will be exported (not editable).</p></section>`,"activities");}
 
 /* v0.2.17 item 3: Criteria page Evidence card for the selected activity (upload, see all files, link to any criteria or none). */
+/* v0.2.20 witness: saved once per portfolio, linked to activities, signs per competence. */
+function witnessSelectHTML(p,a){const ws=p.witnesses||[];return `<select data-witness-pick data-act="${a.id}" data-testid="witness-pick"><option value="">No witness</option>${ws.map(w=>`<option value="${w.id}" ${a.witnessId===w.id?"selected":""}>${esc(w.name||"Unnamed witness")}</option>`).join("")}<option value="__new">+ New witness…</option></select>`;}
+function witnessCardHTML(p,a){const w=witnessOf(p,a.witnessId);const sigs=(a.witnessSigs||[]);
+const f=(k,l,t)=>`<div class="field"><label>${l}</label><input type="${t||"text"}" data-wfield="${k}" data-wid="${w.id}" value="${esc(w[k]||"")}" data-testid="witness-${k}"></div>`;
+return `<section class="card" data-testid="witness-card"><div class="card-head"><h2>Witness</h2>${savedInd()}</div>
+<div class="field"><label>Witness for Activity ${a.n}</label>${witnessSelectHTML(p,a)}</div>
+${w?`${f("name","Name")}${f("jobRole","Job role")}${f("email","Email","email")}${f("phone","Contact number","tel")}${f("employer","Employer / agency")}<p class="tiny muted">Saved once for this portfolio — link the same witness to other activities with the picker above.</p>
+<h3>Witness signatures</h3>${sigs.length?`<ul class="plain-list" data-testid="witness-sig-list">${sigs.map((x,i)=>{const c=COMPS.find(c=>c.id===x.compId);const ww=witnessOf(p,x.witnessId)||w;return `<li class="small">✓ ${esc(c?compLabel(c):x.compId)} · ${esc(ww.name||"")} · ${ukDate(x.signedAt)}${x.comment?` · “${esc(x.comment.slice(0,60))}”`:""} <button class="btn sm ghost" data-action="witness-unsign" data-act="${a.id}" data-idx="${i}">Remove</button></li>`;}).join("")}</ul>`:`<p class="small muted">Not signed yet.</p>`}
+<div class="btn-row"><button class="btn primary" data-action="witness-sign-open" data-act="${a.id}" data-testid="witness-sign-open">Witness signs</button></div>`:`<p class="small muted">Pick a saved witness or add a new one. Their details go on the Record of Witness and the Candidate Testimony.</p>`}
+</section>`;}
+function witnessSignModalHTML(p){const fl=ui.witnessFlow;const a=actOf(p,fl.actId);if(!a)return"";const w=witnessOf(p,a.witnessId);const comps=plannedCompsFor(p,a);
+return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog" data-testid="witness-sign-modal"><header><h2>Witness signs — Activity ${a.n}</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><p class="small muted">${SIG_NOTE}</p><p class="small"><b>${esc(w?w.name:"")}</b>${w&&w.jobRole?" · "+esc(w.jobRole):""}</p>
+<h3>Competences witnessed</h3>${comps.length?comps.map(x=>{const done=(a.witnessSigs||[]).some(s=>s.compId===x.comp.id&&s.witnessId===(w&&w.id));return `<label class="checkline"><input type="checkbox" data-witness-comp="${x.comp.id}" ${fl.selected.has(x.comp.id)?"checked":""}> <span class="grow"><b>${esc(compLabel(x.comp))} · ${esc(x.comp.title)}</b>${done?`<span class="small muted" style="display:block">already signed — signing again updates it</span>`:""}</span></label>`;}).join(""):`<p class="small muted">No planned competences in this activity yet.</p>`}
+<div class="field"><label>Witness feedback (optional — goes in the Testimony feedback box)</label><textarea id="witness-comment" data-testid="witness-comment"></textarea></div>
+${sigPadHTML("witness-sig-pad","witness-sig-pad")}<p class="tiny muted">The witness draws their signature above, then presses Done.</p></div><footer><button class="btn" data-action="close-modal">Cancel</button><button class="btn primary" data-action="witness-sign-save" data-testid="witness-sign-done">Done</button></footer></div>`;}
 function critEvidenceCardHTML(p,a){if(!a)return"";const ev=p.evidence.filter(e=>String(e.activityId)===String(a.id));
 return `<section class="card crit-ev-card" data-testid="crit-evidence-card"><div class="card-head"><h2>Evidence</h2><span class="right small muted">Activity ${a.n} · ${ev.length} file${ev.length===1?"":"s"}</span></div>
 <p class="small muted">Upload this activity's evidence here, then link each file to as many criteria as you like, or none. Each competence's ＋ Add picks from this list.</p>
@@ -327,7 +358,7 @@ ${a?`<div class="share-block"><b>Activity ${a.n}</b><p class="small muted">Impor
 <div class="share-block" data-testid="version-history"><b>Version history · Activity ${a.n}</b><ul class="list small"><li><span class="pill signed">v${a.version}</span><div class="grow">Current</div></li>${(a.versions||[]).slice().reverse().map(v=>`<li><span class="pill planned">v${v.version}</span><div class="grow">${esc(v.label)} · ${fmtDate(v.at)}</div><button class="btn sm" data-action="rollback" data-act="${a.id}" data-ver="${v.version}">Restore</button></li>`).join("")||`<li class="muted small">No earlier versions yet.</li>`}</ul></div>`:""}
 <h3>Whole portfolio</h3><div class="share-block"><p class="small muted">Export just this portfolio (${esc(p.name)}) with its evidence, or import one as a separate new portfolio — your existing portfolios are never replaced.</p><div class="btn-row"><button class="btn" data-action="portfolio-export" data-testid="portfolio-export">⤓ Export whole portfolio (.zip)</button><label class="btn">⤒ Import whole portfolio (.zip)<input type="file" accept=".zip" hidden data-upload="portfolio-import" data-testid="portfolio-import"></label></div></div>
 <h3>Filled MTCS forms</h3><div class="share-block"><p class="small muted">Import a zip of filled MTCS fillable PDFs (the same forms MTCS supplies), whatever the files are called. The app works out which form each file is, reads what's been typed in, and shows you a review before anything is added. Scanned or handwritten forms can't be read.</p><div class="btn-row"><label class="btn primary">⤒ Import filled forms (.zip)<input type="file" accept=".zip" hidden data-upload="smart-import" data-testid="smart-import"></label></div></div></section>`;}
-async function buildPortfolioZip(p){const zip=new JSZip(),files=[];const gp=genPackOf(p);const bids=new Set();p.evidence.forEach(e=>bids.add(e.blobId));(p.activities||[]).forEach(a=>{if(a.assessorSig&&a.assessorSig.blobId)bids.add(a.assessorSig.blobId);(a.signOffSelections||[]).forEach(s=>{if(s.blobId)bids.add(s.blobId);});});
+async function buildPortfolioZip(p){const zip=new JSZip(),files=[];const gp=genPackOf(p);const bids=new Set();p.evidence.forEach(e=>bids.add(e.blobId));(p.activities||[]).forEach(a=>{if(a.assessorSig&&a.assessorSig.blobId)bids.add(a.assessorSig.blobId);(a.signOffSelections||[]).forEach(s=>{if(s.blobId)bids.add(s.blobId);});(a.witnessSigs||[]).forEach(s=>{if(s.blobId)bids.add(s.blobId);});});if(p.signatureBlobId)bids.add(p.signatureBlobId);
 for(const bid of bids){if(!bid)continue;const blob=await blobGet(bid);if(!blob)continue;const path="blobs/"+bid;zip.file(path,blob);files.push({path,blobId:bid,sha256:await sha256(blob),size:blob.size});}
 zip.file("data.json",JSON.stringify({portfolio:p,genPack:gp},null,2));zip.file("manifest.json",JSON.stringify({kind:"mtcs-portfolio-export",schema:1,appVersion:APP_VERSION,candidate:p.name,exportedAt:new Date().toISOString(),files},null,2));return zip.generateAsync({type:"blob"});}
 async function importPortfolioZip(file){const zip=await JSZip.loadAsync(file),mf=zip.file("manifest.json"),df=zip.file("data.json");if(!mf||!df)throw new Error("That zip isn't an MTCS Tracker portfolio export. For filled MTCS forms use Import filled forms.");const manifest=JSON.parse(await mf.async("string"));if(manifest.kind==="mtcs-full-backup")throw new Error("That's a full backup — use Restore below.");if(manifest.kind!=="mtcs-portfolio-export")throw new Error("That zip isn't an MTCS Tracker portfolio export.");
@@ -504,6 +535,7 @@ return `<div class="scrim" data-action="close-modal"></div><div class="modal" ro
 <li><span class="dot" style="background:${age===null||age>7?"var(--gap)":"var(--signed)"}"></span><div class="grow"><b>${age===null?"No backup yet":age>7?("Last backup "+age+" days ago — a fresh backup runs first as part of Send"):("Backed up "+age+" day(s) ago")}</b></div></li>
 <li><span class="dot" style="background:${packs?"var(--signed)":"var(--mapped-dot)"}"></span><div class="grow"><b>${packs?"Forms packs imported":"Forms packs not fully imported"}</b><div class="muted">Only matters for filling official forms, not for this zip.</div></div></li></ul></div><footer><button class="btn primary" data-action="preflight-continue" data-testid="preflight-continue">Continue &amp; download</button></footer></div>`;}}
 if(ui.modal==="bulk-signed"){return `<div class="scrim"></div><div class="modal" role="dialog" data-testid="bulk-signed"><header><h2>Mark ${ui.selCrit.size} as Signed?</h2></header><div class="body"><p>Signed is normally your assessor's act. This will mark <b>${ui.selCrit.size} criteria</b> as Signed in the chosen activity. You can Undo afterwards.</p></div><footer><button class="btn" data-action="close-modal">Cancel</button><button class="btn primary" data-action="bulk-signed-confirm" data-testid="bulk-signed-confirm">Mark ${ui.selCrit.size} as Signed</button></footer></div>`;}
+if(ui.modal==="witness-sign"&&ui.witnessFlow){const p=active();if(p)return witnessSignModalHTML(p);}
 if(ui.modal==="assessor-sign"){const p=active();if(p){
 if(!ui.assessorFlow)ui.assessorFlow={actId:ui.assessorSignAct,step:1,mode:"select",selected:new Set()};
 const flow=ui.assessorFlow; const groups=signOffGroups(p); const pairs=selectedSignOffPairs(p,flow); const critCount=pairs.reduce((n,x)=>n+x.crits.length,0);
@@ -518,7 +550,7 @@ if(ui.modal==="pdf-preview"){const pv=ui.pdfPreview;if(pv){const cur=pv.pages[pv
 ${pv.loading?`<p class="small" data-testid="pdf-preview-loading">Building filled forms…</p>`:pv.error?`<div class="warn-box"><b>Preview failed</b><p class="small">${esc(pv.error)}</p></div>`:`${pv.codeFills?`<p class="tiny muted" data-testid="code-fills">Type of Evidence filled: ${pv.codeFills.length?esc(pv.codeFills.join(" · ")):"none yet — pick O/P/W/Q on Criteria"}</p>`:""}${pv.warnings&&pv.warnings.length?`<div class="warn-box" data-testid="submission-warnings"><b>Check before exporting (${pv.warnings.length})</b><ul>${pv.warnings.map(w=>`<li class="small">${esc(w)}</li>`).join("")}</ul><label class="checkline"><input type="checkbox" id="sub-confirm" data-testid="sub-confirm"> I've checked these warnings and want to export anyway</label></div>`:`<div class="pack-status" style="background:#f5fbf7;border:1px solid #cfe9d8"><b>✓ No warnings</b></div>`}
 <div class="pdf-viewer" data-testid="pdf-viewer"><div class="pdf-thumbs">${pv.pages.map((pg,i)=>`<button class="pdf-thumb ${i===pv.idx?"on":""}" data-action="pdf-thumb" data-idx="${i}" data-testid="pdf-thumb"><span class="small"><b>${esc(pg.label)}</b> · p${pg.page}/${pg.of}</span>${pg.url?`<img src="${pg.url}" alt="">`:`<span class="small muted">${esc(pg.error||"")}</span>`}</button>`).join("")}</div><div class="pdf-main">${cur?(cur.url?`<img src="${cur.url}" alt="${esc(cur.label)} page ${cur.page}" class="pdf-page-img" data-testid="pdf-page-img">`:`<div class="warn-box"><b>${esc(cur.label)}</b><p class="small">${esc(cur.error||"Could not render this form.")}</p></div>`):""}<div class="btn-row" style="justify-content:space-between;margin-top:8px"><button class="btn sm" data-action="pdf-prev" ${pv.idx<=0?"disabled":""}>‹ Prev page</button><span class="small muted">${pv.pages.length?("Page "+(pv.idx+1)+" of "+pv.pages.length):""}${cur?" · "+esc(cur.label):""}</span><button class="btn sm" data-action="pdf-next" ${pv.idx>=pv.pages.length-1?"disabled":""}>Next page ›</button></div></div></div>`}
 </div><footer class="merge-foot"><button class="btn" data-action="close-modal">Back</button><button class="btn primary" data-action="submission-export-do" data-testid="submission-export-do">Download submission pack (.zip)</button></footer></div>`;}}
-if(ui.fillTpl){const p=active();return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog"><header><h2>Fill a copy</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><p class="small muted">Creates a filled copy of <b>${esc(ui.fillTpl.fileName)}</b> (candidate name, date, and for Plan/Feedback forms, activity details). The stored blank is never changed.</p><div class="field"><label>Signature (only if you choose it — never added automatically)</label>${S.profile.signatureBlobId?`<button type="button" class="esign-btn ${ui.fillSig?"on":""}" data-action="fill-esign" data-testid="fill-esign" aria-pressed="${ui.fillSig}"><span class="esign-circle">${ui.fillSig?"✓":""}</span> Add e-signature ${ui.fillSig?"— added":""}</button><p class="tiny muted">Inserts your Profile signature into this copy. Not a legal e-signature service — MTCS may still require ink / scanned sign-off.</p>`:`<p class="small muted">No signature saved yet. <a href="#/profile" data-action="close-modal">Draw or upload one in More → Profile</a>, then come back.</p>`}</div>${p?`<div class="field"><label>Activity</label><select id="fill-act">${p.activities.map(a=>`<option value="${a.id}" ${String(ui.formsAct||workActId(p))===String(a.id)?"selected":""}>Activity ${a.n} — ${esc(a.title)}</option>`).join("")}</select></div>`:`<p class="small">Open a portfolio first.</p>`}</div><footer><button class="btn primary" data-action="do-fill">Download filled copy</button></footer></div>`;}
+if(ui.fillTpl){const p=active();return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog"><header><h2>Fill a copy</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><p class="small muted">Creates a filled copy of <b>${esc(ui.fillTpl.fileName)}</b> (candidate name, date, and for Plan/Feedback forms, activity details). The stored blank is never changed.</p><div class="field"><label>Signature (only if you choose it — never added automatically)</label>${CS().signatureBlobId?`<button type="button" class="esign-btn ${ui.fillSig?"on":""}" data-action="fill-esign" data-testid="fill-esign" aria-pressed="${ui.fillSig}"><span class="esign-circle">${ui.fillSig?"✓":""}</span> Add e-signature ${ui.fillSig?"— added":""}</button><p class="tiny muted">Inserts your Profile signature into this copy. Not a legal e-signature service — MTCS may still require ink / scanned sign-off.</p>`:`<p class="small muted">No signature saved yet. <a href="#/profile" data-action="close-modal">Draw or upload one in More → Profile</a>, then come back.</p>`}</div>${p?`<div class="field"><label>Activity</label><select id="fill-act">${p.activities.map(a=>`<option value="${a.id}" ${String(ui.formsAct||workActId(p))===String(a.id)?"selected":""}>Activity ${a.n} — ${esc(a.title)}</option>`).join("")}</select></div>`:`<p class="small">Open a portfolio first.</p>`}</div><footer><button class="btn primary" data-action="do-fill">Download filled copy</button></footer></div>`;}
 return "";}
 function critNavInfo(){const list=ui.critNavList&&ui.critNavList.length?ui.critNavList:CRITS.map(k=>k.id);const idx=list.indexOf(ui.drawerCrit);return{list,idx};}
 function drawerActId(p){let id=ui.drawerAct||(ui.critScope&&ui.critScope!=="all"?ui.critScope:null)||workActId(p);if(!actOf(p,id))id=p.activities[0].id;return String(id);}
@@ -543,7 +575,10 @@ ${ui.pendingSigned&&ui.pendingSigned.crit===k.id&&String(ui.pendingSigned.act)==
 <div class="btn-row"><label class="btn sm">＋ Add evidence for this criterion<input type="file" multiple hidden data-upload="evidence-for-crit" data-act="${actId}" data-crit="${k.id}"></label></div>
 </div></aside>`;}
 function navigateCrit(delta){ui.pendingSigned=null;const{list,idx}=critNavInfo();if(idx<0)return;const next=idx+delta;if(next<0||next>=list.length)return;ui.drawerCrit=list[next];history.replaceState(null,"",location.pathname+location.search+here()+"?c="+encodeURIComponent(ui.drawerCrit));render();}
-function setCov(p,crit,act,patch){p.criteria[crit]=p.criteria[crit]||{};p.criteria[crit][String(act)]=Object.assign(cov(p,crit,act),patch);p.updatedAt=new Date().toISOString();save();}
+function setCov(p,crit,act,patch){p.criteria[crit]=p.criteria[crit]||{};const n=Object.assign({},cov(p,crit,act),patch);
+ /* v0.2.20 one rule: a real code makes it Evidenced; Evidenced without a real code goes back to Planned; Planned/Gap carry no code. */
+ if(n.status!=="Signed"){if(patch.status==="Planned"||patch.status==="Gap"){n.code=["N/C","N/A"].includes(patch.code)?patch.code:"";}else if(REAL_CODES.includes(n.code))n.status="Evidenced";else if(n.status==="Evidenced")n.status="Planned";}
+ p.criteria[crit][String(act)]=n;p.updatedAt=new Date().toISOString();save();}
 async function addEvidenceFiles(p,files,actId){const added=[];for(const raw of files){const f=await maybeCompressImage(raw);const blobId=uid("blob");await blobSet(blobId,f);const ev={id:uid("ev"),blobId,title:cleanTitle(f.name),fileName:f.name,mime:f.type||"application/octet-stream",size:f.size,date:fileDateISO(raw),tags:[],criteria:suggestCriteria(f.name).length&&actId?[]:[],activityId:actId||"",redact:false,createdAt:new Date().toISOString(),compressed:f!==raw};p.evidence.push(ev);added.push(ev);}save();return added;}
 const PACK_LABEL=k=>k==="imported"?"Imported pack":(((window.PACK_META||{}).units||{})[k]||{}).label||k;
 function setPackProgress(stage,detail,done,total,pctOverride){ui.packProgress={stage,detail:detail||"",done:done||0,total:total||0,pct:pctOverride!=null?pctOverride:(total?Math.round(100*(done||0)/total):null),error:null};render();}
@@ -557,12 +592,17 @@ function blobIsReferenced(blobId,ignoreTemplateId){if(!blobId)return false;
 if(S.templates.some(x=>x.blobId===blobId&&x.id!==ignoreTemplateId))return true;
 if(S.portfolios.some(pf=>(pf.evidence||[]).some(e=>e.blobId===blobId)))return true;
 if(S.portfolios.some(pf=>(pf.activities||[]).some(a=>a.assessorSig&&a.assessorSig.blobId===blobId)))return true;
+if(S.portfolios.some(pf=>pf.signatureBlobId===blobId||(pf.activities||[]).some(a=>(a.signOffSelections||[]).some(x=>x.blobId===blobId)||(a.witnessSigs||[]).some(x=>x.blobId===blobId))))return true;if(S.profile&&S.profile.signatureBlobId===blobId)return true;
 if(S.shared.some(x=>(x.evidenceBlobs||[]).includes(blobId)||(x.evidence||[]).some(e=>e.blobId===blobId)))return true;
 return false;}
 function refreshPackImport(k,zipName,importedAt){const count=S.templates.filter(x=>x.packKey===k).length;S.packImports=S.packImports.filter(i=>i.packKey!==k);if(count)S.packImports.push({packKey:k,zipName:zipName||"",fileCount:count,importedAt:importedAt||new Date().toISOString()});}
 /* One stored template per packKey+fileName (newest wins); one packImports record per pack.
    Orphaned duplicate blobs are deleted only when nothing else references them. */
-function migrateLegacyPortfolios(){let changed=false;S.portfolios.forEach(pf=>{
+function migrateLegacyPortfolios(){let changed=false;
+/* v0.2.20: copy the old shared Profile signature into each existing portfolio (once). */
+if(!S.settings.sigPerPortfolio){S.portfolios.forEach(pf=>{if(!("signatureBlobId" in pf)||pf.signatureBlobId==null){pf.signatureBlobId=S.profile.signatureBlobId||null;pf.signatureUpdatedAt=S.profile.signatureUpdatedAt||null;}});S.settings.sigPerPortfolio=true;changed=true;}
+S.portfolios.forEach(pf=>{if(!("signatureBlobId" in pf)){pf.signatureBlobId=null;changed=true;}if(!Array.isArray(pf.witnesses)){pf.witnesses=[];changed=true;}(pf.activities||[]).forEach(a=>{if(!Array.isArray(a.witnessSigs)){a.witnessSigs=[];changed=true;}if(a.witness&&!a.witnessId){const nm=String(a.witness).trim();let w=pf.witnesses.find(x=>x.name.trim().toUpperCase()===nm.toUpperCase());if(!w){w={id:uid("wit"),name:nm,jobRole:"",email:"",phone:"",employer:""};pf.witnesses.push(w);}a.witnessId=w.id;changed=true;}});});
+S.portfolios.forEach(pf=>{
 if(pf.genPackId&&!(S.genPacks||[]).some(g=>g.id===pf.genPackId)){pf.genPackId=null;changed=true;}
 (pf.activities||[]).forEach(a=>{if(!("assessorSig" in a)){a.assessorSig=null;changed=true;}if(!("candidateSignedAt" in a)){a.candidateSignedAt=null;changed=true;}if(!Array.isArray(a.sigAudit)){a.sigAudit=[];changed=true;}if(!Array.isArray(a.signOffSelections)){a.signOffSelections=[];changed=true;}(a.ukq||[]).forEach(u=>{if(u.ok&&u.ok!=="Y"){u.ok=/^\s*(y|yes|✓|true|1)\s*$/i.test(String(u.ok))?"Y":"";changed=true;}});if(!Array.isArray(a.planCritIds)){a.planCritIds=Object.keys(pf.criteria||{}).filter(cid=>{const c=(pf.criteria[cid]||{})[a.id];return c&&c.status!=="Gap";});changed=true;}});
 });if(changed)save();}
@@ -628,7 +668,7 @@ const zip=new JSZip(),fileEntries=[];for(const e of ev){const blob=await blobGet
 const manifest={kind,appVersion:APP_VERSION,portfolioId:p.id,activityId:a.id,candidate:p.name,candidateName:p.name,route:p.routeLabel,exportSeq:a.exportSeq+(kind==="activity-export"?1:0),baseVersion:a.version,exportedAt:new Date().toISOString(),files:fileEntries};
 zip.file("manifest.json",JSON.stringify(manifest,null,2));zip.file("activity.json",JSON.stringify({activity:a,criteria:crit,genPack:genPackOf(p),evidence:ev.map(e=>{const{blobId,...rest}=e;return rest;})},null,2));return{zip,manifest};}
 async function buildBackupBlob(){const zip=new JSZip(),files=[];zip.file("data.json",JSON.stringify({portfolios:S.portfolios,templates:S.templates,packImports:S.packImports,shared:S.shared,genPacks:S.genPacks,profile:S.profile,settings:S.settings},null,2));
-const bids=new Set();S.portfolios.forEach(p=>{p.evidence.forEach(e=>bids.add(e.blobId));(p.activities||[]).forEach(a=>{if(a.assessorSig&&a.assessorSig.blobId)bids.add(a.assessorSig.blobId);});});S.templates.forEach(t=>bids.add(t.blobId));S.shared.forEach(x=>(x.evidenceBlobs||[]).forEach(b=>bids.add(b)));if(S.profile&&S.profile.signatureBlobId)bids.add(S.profile.signatureBlobId);
+const bids=new Set();S.portfolios.forEach(p=>{p.evidence.forEach(e=>bids.add(e.blobId));(p.activities||[]).forEach(a=>{if(a.assessorSig&&a.assessorSig.blobId)bids.add(a.assessorSig.blobId);});});S.templates.forEach(t=>bids.add(t.blobId));S.shared.forEach(x=>(x.evidenceBlobs||[]).forEach(b=>bids.add(b)));if(S.profile&&S.profile.signatureBlobId)bids.add(S.profile.signatureBlobId);S.portfolios.forEach(p=>{if(p.signatureBlobId)bids.add(p.signatureBlobId);(p.activities||[]).forEach(a=>{(a.signOffSelections||[]).forEach(x=>{if(x.blobId)bids.add(x.blobId);});(a.witnessSigs||[]).forEach(x=>{if(x.blobId)bids.add(x.blobId);});});});
 for(const bid of bids){const blob=await blobGet(bid);if(!blob)continue;const path="blobs/"+bid;zip.file(path,blob);files.push({path,blobId:bid,sha256:await sha256(blob),size:blob.size});}
 zip.file("manifest.json",JSON.stringify({kind:"mtcs-full-backup",schema:1,appVersion:APP_VERSION,exportedAt:new Date().toISOString(),files},null,2));
 return zip.generateAsync({type:"blob"});}
@@ -686,18 +726,18 @@ function sigPlacement(rect,imgW,imgH,meta){
   const s=Math.min(rect.width/imgW,rect.height/imgH);const w=imgW*s,h=imgH*s;return{x:rect.x,y:rect.y+(rect.height-h)/2,width:w,height:h,mode:"contain",scale:s};}
 async function drawSigInRect(pdf,page,rect,blobId,png){const pl=sigPlacement(rect,png.width,png.height,sigMetaOf(blobId));page.drawImage(png,{x:pl.x,y:pl.y,width:pl.width,height:pl.height});(window.__sigPlacements=window.__sigPlacements||[]).push({rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},pl,imgW:png.width,imgH:png.height});return pl;}
 function openPadOverlay(id,size){const c=document.getElementById(id);const w=c&&c.closest(".sig-pad-wrap");if(!w)return;w.classList.add("big");w.classList.toggle("full",size==="full");w.classList.toggle("mid",size!=="full");w.classList.toggle("rot",window.innerHeight>window.innerWidth);document.body.classList.add("sig-big-on");}
-function initSigPad(){["sig-pad","assessor-sig-pad"].forEach(id=>initOnePad(document.getElementById(id)));}
+function initSigPad(){["sig-pad","assessor-sig-pad","witness-sig-pad"].forEach(id=>initOnePad(document.getElementById(id)));}
 function initOnePad(c){if(!c||c.dataset.init)return;c.dataset.init="1";const ctx=c.getContext("2d");ctx.lineWidth=3.2;ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle="#14324a";let drawing=false,last=null;
 const pos=e=>{const r=c.getBoundingClientRect();const w=c.closest(".sig-pad-wrap");if(w&&w.classList.contains("rot")){return{x:(e.clientY-r.top)*(c.width/r.height),y:(r.right-e.clientX)*(c.height/r.width)};}return{x:(e.clientX-r.left)*(c.width/r.width),y:(e.clientY-r.top)*(c.height/r.height)};};
 c.addEventListener("pointerdown",e=>{drawing=true;last=pos(e);try{c.setPointerCapture(e.pointerId);}catch(_){}e.preventDefault();});
 c.addEventListener("pointermove",e=>{if(!drawing)return;const pt=pos(e);ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(pt.x,pt.y);ctx.stroke();last=pt;c.dataset.dirty="1";});
 ["pointerup","pointercancel","pointerleave"].forEach(ev=>c.addEventListener(ev,()=>{drawing=false;}));}
-function profileCardHTML(){const pf=active();const nameVal=S.profile.name||(pf?pf.name:"");const hasSig=!!S.profile.signatureBlobId;
+function profileCardHTML(){const pf=active();{const want=CS().signatureBlobId||null;if(ui.sigUrlFor!==want){ui.sigUrlFor=want;if(ui.sigUrl){try{URL.revokeObjectURL(ui.sigUrl);}catch(_){}}ui.sigUrl=null;if(want)blobGet(want).then(b=>{if(b&&ui.sigUrlFor===want){ui.sigUrl=URL.createObjectURL(b);render();}}).catch(()=>{});}}const nameVal=S.profile.name||(pf?pf.name:"");const hasSig=!!CS().signatureBlobId;
 const uploadBtn=`<label class="btn">Upload signature image<input type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" hidden data-upload="signature" data-testid="sig-upload"></label>`;
 return `<section class="card" id="profile" data-testid="profile-card"><div class="card-head"><h2>Profile</h2>${savedInd()}</div>
 <div class="field"><label>Your name</label><input value="${esc(nameVal)}" data-profile-name data-testid="profile-name" placeholder="Your full name"></div>
-<h3>Your signature</h3><p class="small muted">Draw once, reuse where a form asks you to sign. Stored only on this device. This is a drawn signature image for convenience — it is not a legal e-signature service; MTCS ink requirements still apply.</p>
-${hasSig&&!ui.sigPadOpen?`${ui.sigUrl?`<img src="${ui.sigUrl}" alt="Your saved signature" class="sig-preview" data-testid="sig-preview">`:`<p class="small">✓ Signature saved</p>`}<p class="tiny muted">Saved ${S.profile.signatureUpdatedAt?fmtDate(S.profile.signatureUpdatedAt):""}</p><div class="btn-row"><button class="btn" data-action="sig-replace" data-testid="sig-replace">Replace — draw again</button>${uploadBtn}<button class="btn ghost" data-action="sig-clear" data-testid="sig-clear">Clear</button></div>`
+<h3>Your signature</h3><p class="small muted" data-testid="sig-scope">${pf?"For this portfolio ("+esc(pf.name)+"). Each portfolio keeps its own signature.":"Open a portfolio to set its signature."}</p><p class="small muted">Draw once, reuse where a form asks you to sign. Stored only on this device. This is a drawn signature image for convenience — it is not a legal e-signature service; MTCS ink requirements still apply.</p>
+${hasSig&&!ui.sigPadOpen?`${ui.sigUrl?`<img src="${ui.sigUrl}" alt="Your saved signature" class="sig-preview" data-testid="sig-preview">`:`<p class="small">✓ Signature saved</p>`}<p class="tiny muted">Saved ${CS().signatureUpdatedAt?fmtDate(CS().signatureUpdatedAt):""}</p><div class="btn-row"><button class="btn" data-action="sig-replace" data-testid="sig-replace">Replace — draw again</button>${uploadBtn}<button class="btn ghost" data-action="sig-clear" data-testid="sig-clear">Clear</button></div>`
 :`${sigPadHTML("sig-pad","sig-pad")}<div class="btn-row"><button class="btn primary" data-action="sig-save" data-testid="sig-save">Save signature</button>${uploadBtn}${hasSig?`<button class="btn" data-action="sig-cancel-pad">Cancel</button>`:""}</div><p class="tiny muted">Or upload a PNG/JPG photo or scan of your ink signature — it is placed on a white background and stored on this device like a drawn one.</p>`}
 </section>`;}
 /* ---- v0.2.3 submission pack: filled forms, signatures, preview ---- */
@@ -726,10 +766,13 @@ function submissionFormsPlan(p,scopeActId){
     });
     findAll(/FeedbackForm/i).forEach(tpl=>out.push({tpl,act:a,kind:"Feedback",label:"Feedback form"}));
     findAll(/CandidateTestimony/i).forEach(tpl=>out.push({tpl,act:a,kind:"Candidate Testimony",label:"Candidate testimony"}));
-    if(a.witness)findAll(/Record_of_Witness/i).forEach(tpl=>out.push({tpl,act:a,kind:"Record of Witness",label:"Record of witness"}));
   });
-  findAll(/Assessor_SignOff/i).forEach(tpl=>{if(!seenSignOff.has(tpl.id)){seenSignOff.add(tpl.id);out.push({tpl,act:acts[0]||null,kind:"Assessor Sign-Off",label:"Assessor sign-off"});}});
-  const seen=new Set(); return out.filter(o=>{const k=(o.act?o.act.id:"-")+"|"+o.kind+"|"+o.tpl.fileName; if(seen.has(k))return false; seen.add(k); if(o.act&&(o.act.planCritIds||[]).length&&/Assessment Plan|Feedback|Competence|UKQ/.test(o.kind)&&!critsForForm(p,o.act,o.tpl,o.kind).length)return false; return true;});
+  /* v0.2.20: one Record of Witness per witness (not per activity) */
+  witnessGroups(p,acts).forEach((g,i)=>findAll(/Record_of_Witness/i).slice(0,1).forEach(tpl=>out.push({tpl,act:null,acts,witness:g.w,wsigs:g.sigs,kind:"Record of Witness",key:"w"+i,label:"Record of witness \u00b7 "+(g.w.name||"Witness")})));
+  /* v0.2.20 item 7: one sign-off per assessor */
+  const _ag=signOffAssessors(p,acts);
+  findAll(/Assessor_SignOff/i).forEach(tpl=>{if(!seenSignOff.has(tpl.id)){seenSignOff.add(tpl.id);if(_ag.length<=1)out.push({tpl,act:acts[0]||null,acts,assessor:_ag[0]||null,kind:"Assessor Sign-Off",label:"Assessor sign-off"});else _ag.forEach((g,i)=>out.push({tpl,act:acts[0]||null,acts,assessor:g,key:"a"+i,kind:"Assessor Sign-Off",label:"Assessor sign-off \u00b7 "+(g.name||"Assessor "+(i+1))}));}});
+  const seen=new Set(); return out.filter(o=>{const k=(o.act?o.act.id:"-")+"|"+o.kind+"|"+o.tpl.fileName+"|"+(o.key||""); if(seen.has(k))return false; seen.add(k); if(o.act&&(o.act.planCritIds||[]).length&&/Assessment Plan|Feedback|Competence|UKQ/.test(o.kind)&&!critsForForm(p,o.act,o.tpl,o.kind).length)return false; return true;});
 }
 function evidenceZipPath(p,e,used){
   const a=p.activities.find(x=>String(x.id)===String(e.activityId));
@@ -784,7 +827,19 @@ function signedSignOffPairs(p){
   }); return out;
 }
 /* Short competence identifier for the 36pt Comp cell (form pre-prints 1-3 for Core). */
-const compShortId=c=>(c.unitId==="core"?"":String(c.unitShort||"R").trim().charAt(0).toUpperCase())+String(c.number||"");
+const compShortId=c=>(c.unitId==="core"?"":routeAbbr(c.unitShort))+String(c.number||"");
+/* v0.2.20: UK (Europe/London) date dd/mm/yyyy for dates beside a real signature. */
+function ukDate(iso){try{const d=new Date(iso);if(isNaN(d))return "";return d.toLocaleDateString("en-GB",{timeZone:"Europe/London",day:"2-digit",month:"2-digit",year:"numeric"});}catch(_){return "";}}
+const witnessOf=(p,id)=>(p.witnesses||[]).find(w=>w.id===id)||null;
+const actWitness=(p,a)=>a?(witnessOf(p,a.witnessId)||(a.witness?{id:"",name:a.witness,jobRole:"",email:"",phone:"",employer:""}:null)):null;
+const assessorKey=(name,blobId)=>String(name||"").trim().toUpperCase()||("SIG:"+(blobId||""));
+/* v0.2.20 item 7: signed pairs grouped by assessor so a name never sits beside another person's signature. */
+function signOffAssessors(p,acts){const pairs=signedSignOffPairs(p).filter(pr=>!acts||acts.some(a=>a.id===pr.act.id));const m=new Map();pairs.forEach(pr=>{const nm=pr.sel.assessorName||(pr.act.assessorSig&&pr.act.assessorSig.name)||"";const bid=pr.sel.blobId||(pr.act.assessorSig&&pr.act.assessorSig.blobId)||"";const k=assessorKey(nm,bid);if(!m.has(k))m.set(k,{key:k,name:nm,blobId:bid,signedAt:pr.sel.signedAt||"",pairs:[]});const g=m.get(k);g.pairs.push(pr);if(String(pr.sel.signedAt||"")>=String(g.signedAt||"")){g.signedAt=pr.sel.signedAt||g.signedAt;if(bid)g.blobId=bid;}});return [...m.values()];}
+/* v0.2.20 item 6: row-level answers across all activities. */
+const compAllCovered=(p,c)=>c.criteria.length>0&&c.criteria.every(k=>critOverall(p,k.id)==="Signed");
+const compKnowledge=(p,c)=>{const ids=new Set(c.criteria.map(k=>k.id));return p.activities.some(a=>(a.ukq||[]).some(u=>String(u.q||"").trim()&&String(u.a||"").trim()&&u.ok==="Y"&&(u.crits||[]).some(id=>ids.has(id))));};
+/* witnesses with signatures, per witness (one Record of Witness each) */
+function witnessGroups(p,acts){const m=new Map();(acts||p.activities).forEach(a=>{const w=actWitness(p,a);(a.witnessSigs||[]).forEach(sg=>{const wid=sg.witnessId||(w&&w.id)||"";const wr=witnessOf(p,wid)||w;if(!wr)return;const k=wr.id||("N:"+wr.name);if(!m.has(k))m.set(k,{w:wr,sigs:[]});m.get(k).sigs.push({act:a,sig:sg});});if(w){const k=w.id||("N:"+w.name);if(!m.has(k))m.set(k,{w,sigs:[]});}});return [...m.values()];}
 function signOffFieldNames(rowIdx,actIdx){
   const r=rowIdx+1, suf=actIdx>1?("_"+actIdx):"";
   if(r<=3)return{sig:"Signature"+r+suf,date:"Date"+r+suf,all:"All Criteria Covered"+r,know:"Knowledge Assessed"+r,label:null};
@@ -832,9 +887,9 @@ async function buildPdfPreview(scopeActId,onlyForWork){
     const sum=buildSubmissionSummary(p,scopeActId||null);
     const pages=[];const codeFills=[];
     for(const entry of entries){
-      const label=(entry.label||entry.kind)+(entry.act?" · Activity "+entry.act.n:"");
+      const label=(entry.label||entry.kind)+(entry.act&&!/Record of Witness|Assessor Sign-Off/.test(entry.kind)?" · Activity "+entry.act.n:"");
       try{
-        const r=await fillFormForSubmission(entry,p);(r.filled||[]).filter(x=>/evidence code/.test(x)).forEach(x=>codeFills.push((entry.act?"A"+entry.act.n+" ":"")+x));
+        const r=await fillFormForSubmission(entry,p);(r.filled||[]).filter(x=>/evidence code/.test(x)).forEach(x=>codeFills.push((entry.act?"A"+entry.act.n+" ":"")+x));(r.warnings||[]).forEach(w=>{const m=(entry.label||entry.kind)+(entry.act?" (Activity "+entry.act.n+")":"")+": "+w;if(!sum.warnings.includes(m))sum.warnings.push(m);});
         const buf=await r.blob.arrayBuffer();
         const doc=await window.pdfjsLib.getDocument({data:buf.slice(0)}).promise;
         for(let i=1;i<=doc.numPages;i++){
@@ -868,7 +923,13 @@ function buildSubmissionSummary(p,scopeActId){
   if(unmapped.length)warnings.push(unmapped.length+" evidence file(s) not linked to any criterion (labelled UNMAPPED in the pack).");
   if(!S.templates.length)warnings.push("No blank MTCS forms stored in this browser — pack will contain evidence only.");
   if(!evList.length)warnings.push("No evidence files in scope.");
-  if(CRITS.length&&CRITS.some(k=>critOverall(p,k.id)==="Gap"))warnings.push(CRITS.filter(k=>critOverall(p,k.id)==="Gap").length+" criteria are still Gap overall.");
+  if(!scopeActId&&CRITS.length&&CRITS.some(k=>critOverall(p,k.id)==="Gap"))warnings.push(CRITS.filter(k=>critOverall(p,k.id)==="Gap").length+" criteria are still Gap overall.");
+  /* v0.2.20 item 8: check every planned criterion in this export's own scope */
+  acts.forEach(a=>{const pl=planCritOf(p,a);if(!pl.length)return;const L=(arr,txt)=>{if(arr.length)warnings.push("Activity "+a.n+": "+arr.length+" "+txt+": "+arr.slice(0,8).join(", ")+(arr.length>8?"…":"")+".");};
+    L(pl.filter(k=>effStatus(cov(p,k.id,a.id))==="Planned"&&!REAL_CODES.includes(cov(p,k.id,a.id).code)&&!["N/C","N/A"].includes(cov(p,k.id,a.id).code)&&!evLinkedCrit(p,k.id).some(e=>String(e.activityId)===String(a.id))).map(k=>k.id),"planned criteria with no evidence file or code yet");
+    L(pl.filter(k=>{const c=cov(p,k.id,a.id);return c.status==="Signed"&&["P","W"].includes(c.code)&&!evLinkedCrit(p,k.id).length;}).map(k=>k.id),"signed P/W criteria with no evidence file attached");
+    L(pl.filter(k=>cov(p,k.id,a.id).code==="N/C").map(k=>k.id),"criteria marked N/C (not covered — not counted as done)");
+    if(!String(a.dates||"").trim())warnings.push("Activity "+a.n+": no assessment dates entered.");});
   {const aw=awaitingIds(p);const A=aw.filter(id=>critFlags(p,id).includes("attach")),Q=aw.filter(id=>critFlags(p,id).includes("question"));if(A.length)warnings.push(A.length+" criteria evidenced by P/W but awaiting attachment: "+A.slice(0,8).join(", ")+(A.length>8?"…":"")+".");if(Q.length)warnings.push(Q.length+" criteria evidenced by Q but awaiting question link (Knowledge questions): "+Q.slice(0,8).join(", ")+(Q.length>8?"…":"")+".");}
   const root=safeName(p.name+"_"+p.routeLabel);
   return {acts,forms,evEntries,warnings,root,hasForms:forms.length>0,hasEvidence:evList.length>0};
@@ -897,7 +958,7 @@ const FIELD_FONT_MAX=10;
 function capFieldFont(tf,text){try{const da=String(tf.acroField.getDefaultAppearance()||"");const m=da.match(/([\d.]+)\s+Tf/);const cur=m?Number(m[1]):0;if(cur>0&&cur<=FIELD_FONT_MAX)return;
   const r=tf.acroField.getWidgets()[0].getRectangle();const multi=tf.isMultiline();const lines=String(text).split("\n");const W=Math.max(10,r.width-6),H=Math.max(6,r.height-3);
   const fits=sz=>{if(!multi)return sz*1.15<=H&&Math.max(...lines.map(l=>l.length))*0.52*sz<=W;const cpl=Math.max(1,Math.floor(W/(0.52*sz)));const n=lines.reduce((t,l)=>t+Math.max(1,Math.ceil(l.length/cpl)),0);return n*sz*1.18<=H;};
-  let size=FIELD_FONT_MAX;while(size>6&&!fits(size))size-=0.5;tf.setFontSize(size);}catch(_){}}
+  let size=FIELD_FONT_MAX;while(size>6&&!fits(size))size-=0.5;tf.setFontSize(size);return fits(size);}catch(_){}}
 function setAutoFit(form,name,text,warn,filled){
   let f0=null; try{f0=form.getTextField(name);}catch(_){return;}
   try{const f=f0; try{f.enableMultiline();}catch(_){} const r=f.acroField.getWidgets()[0].getRectangle();
@@ -911,71 +972,102 @@ async function fillFormForSubmission(entry,p){
   const {tpl,act:a,kind}=entry; const filled=[],appended=[],warn=[];
   const blob=await blobGet(tpl.blobId); if(!blob)throw new Error("Stored blank missing: "+tpl.fileName);
   const pdf=await PDFLib.PDFDocument.load(await blob.arrayBuffer()); let form=null; try{form=pdf.getForm();}catch(_){}
-  const set=(n,v)=>{if(v==null||v==="")return; if(!form)return; try{const tf=form.getTextField(n); capFieldFont(tf,String(v)); tf.setText(String(v)); if(!filled.includes(n))filled.push(n);}catch(_){}};
-  const cand=(p.name||"").toUpperCase(), assessor=((a&&a.assessorName)||p.assessedBy||"").toUpperCase();
+  /* v0.2.20 item 9: warn when text cannot fit even at the 6pt minimum */
+  const set=(n,v)=>{if(v==null||v==="")return; if(!form)return; try{const tf=form.getTextField(n); const fit=capFieldFont(tf,String(v)); tf.setText(String(v)); if(fit===false)warn.push("Text in '"+n+"' is too long to fit at the 6pt minimum and may be cut off — shorten it."); if(!filled.includes(n))filled.push(n);}catch(_){}};
+  const isRoW=/Record of Witness/.test(kind), isSO=/Assessor Sign-Off/.test(kind), isTest=/Candidate Testimony/.test(kind);
+  const ag=isSO?(entry.assessor!==undefined?entry.assessor:(signOffAssessors(p,entry.acts||null)[0]||null)):null;
+  const cand=(p.name||"").toUpperCase();
+  const assessor=(isSO?((ag&&ag.name)||""):((a&&a.assessorName)||(a&&a.assessorSig&&a.assessorSig.name)||p.assessedBy||"")).toUpperCase();
   const crits=critsForForm(p,a,tpl,kind);
   const critCodes=crits.map(k=>k.id).join(", ");
-  const types=[...new Set(crits.map(k=>a?cov(p,k.id,a.id).code:"").filter(Boolean).map(c=>CODE_LABEL[c]||c))].join(", ");
-  set("Candidate Name",cand); set("Candidate name",cand); set("Date",todayISO()); set("Date_2",todayISO()); set("Date_3",todayISO());
-  set("Grade",p.routeLabel); set("Assessor Name",assessor); set("Assessor name",assessor);
-  if(a){
+  const types=[...new Set(crits.map(k=>a?cov(p,k.id,a.id).code:"").filter(c=>REAL_CODES.includes(c)).map(c=>CODE_LABEL[c]||c))].join(", ");
+  const wit=a?actWitness(p,a):null, witName=wit?String(wit.name||"").toUpperCase():"";
+  set("Candidate Name",cand); set("Candidate name",cand);
+  set("Grade",p.routeLabel);
+  if(!isRoW&&!isTest){set("Assessor Name",assessor); set("Assessor name",assessor);}
+  if(a&&!isSO&&!isRoW){
     set("Activity Number 12 or 3",a.n);
     set("Work activity to be assessed",a.summary||a.title);
     {const pc=/AssessmentPlan/i.test(tpl.fileName||"")?planCritOf(p,a):crits; if(form&&pc.length)setAutoFit(form,"Which performance criteria in the competences do you intend to assess",planCritText(pc),warn,filled);}
     set("What type of evidence will be assessed Observation Work Product Questioning or other please specify",types||a.planText||"");
     set("What date or dates will the assessment take place",a.dates); set("Where will the assessment take place eg name of vessel installation system workshop etc",a.where);
-    set("Witness name if applicable",a.witness); set("Witness name If applicable in assessment plan",a.witness); set("Particular assessment needs and name of any witness involved",a.witness||a.planText||"");
-    set("Please specify the reasons for your decision",a.feedbackText); set("Summary of further action for the candidate",a.feedbackText?"See assessor feedback / next activity plan.":"");
-    set("Candidates comments",a.candidateComments); set("Candidate StatementRow1",a.candidateComments||a.summary||""); set("Description of TaskRow1",a.summary||a.title);
-    set("Competencies",critCodes); set("Location of Activity",a.where); set("AssessorWitness",a.witness||assessor); set("Feedback completed by AssessorWitnessRow1",a.feedbackText||"");
+    set("Witness name if applicable",witName); set("Witness name If applicable in assessment plan",witName); set("Particular assessment needs and name of any witness involved",witName||a.planText||"");
+    set("Please specify the reasons for your decision",a.feedbackText);
+    set("Candidates comments",a.candidateComments);
+    if(isTest){
+      set("Candidate StatementRow1",a.candidateComments); set("Description of TaskRow1",a.summary||a.title);
+      set("Competencies",critCodes); set("Location of Activity",a.where);
+      set("AssessorWitness",witName);
+      if(wit){set("Assessor Witness Job Role",wit.jobRole); set("AssessorWitness EmployerAgency",wit.employer);}
+      const ws=(a.witnessSigs||[]).filter(x=>x.blobId).sort((x,y)=>String(y.signedAt).localeCompare(String(x.signedAt)))[0];
+      /* feedback box only carries what the witness wrote */
+      const wfb=[...new Set((a.witnessSigs||[]).map(x=>String(x.comment||"").trim()).filter(Boolean))].join("\n");
+      set("Feedback completed by AssessorWitnessRow1",wfb);
+      if(ws&&await drawSigAtField(pdf,form,"AssessorWitness_2",ws.blobId,filled))set("Date_3",ukDate(ws.signedAt));
+    }
     if(/Feedback/i.test(kind)){
-      const entries=crits.map(k=>cov(p,k.id,a.id)); const allSigned=entries.length&&entries.every(c=>c.status==="Signed");
-      set("Has the candidate demonstrated competence in this activity  yesno",entries.length?(allSigned?"Yes":"No"):"");
-      const allActsDone=p.activities.every(x=>planCritOf(p,x).length&&planCritOf(p,x).every(k=>cov(p,k.id,x.id).status==="Signed"));
+      const entries=crits.map(k=>cov(p,k.id,a.id)); const hasSig=!!(a.assessorSig&&a.assessorSig.blobId);
+      const allSigned=entries.length&&entries.every(c=>c.status==="Signed");
+      /* v0.2.20 item 1: "Yes" only with a captured assessor signature */
+      set("Has the candidate demonstrated competence in this activity  yesno",entries.length?(allSigned&&hasSig?"Yes":"No"):"");
+      const allActsDone=p.activities.every(x=>x.assessorSig&&x.assessorSig.blobId&&planCritOf(p,x).length&&planCritOf(p,x).every(k=>cov(p,k.id,x.id).status==="Signed"));
       set("Has the candidate now demonstrated competence in three activities yesno",allActsDone?"Yes":"No");
     }
     if(entry.comp){
-      // Competence sheet: Type of Evidence fields in form order map to criteria in order
-      try{const tof=(form?form.getFields():[]).filter(f=>/^Type of Evidence/i.test(f.getName())); entry.comp.criteria.forEach((k,i)=>{const cv=cov(p,k.id,a.id); const f=tof[i]; if(f&&cv.code){try{f.setText(cv.code); filled.push(k.id+" evidence code ("+cv.code+")");}catch(_){}} else if(cv.status!=="Gap"){/* status listed on appended criteria sheet */}});}catch(e){warn.push("Competence code fill: "+e.message);}
+      /* v0.2.20 item 10: match by field name (criterion text), not field order */
+      try{const norm=t=>String(t).toLowerCase().replace(/[^a-z0-9]/g,"");const tof=(form?form.getFields():[]).filter(f=>/^Type of Evidence/i.test(f.getName()));const used=new Set();
+        entry.comp.criteria.forEach(k=>{const cv=cov(p,k.id,a.id); if(!cv.code)return; const key=norm(k.text).slice(0,25); const f=key?tof.find(x=>!used.has(x)&&norm(x.getName()).includes(key)):null;
+          if(!f){warn.push(k.id+": no matching 'Type of Evidence' field on this form — code "+cv.code+" not filled.");return;} used.add(f); try{f.setText(cv.code); filled.push(k.id+" evidence code ("+cv.code+")");}catch(_){}});}catch(e){warn.push("Competence code fill: "+e.message);}
     }
     if(/^UKQ/i.test(kind)){
-      (a.ukq||[]).slice(0,10).forEach((u,i)=>{if(u.q||u.a)set(String(i+1),(u.q?u.q+" — ":"")+(u.a||"")); if(u.ok)set("Satisfactory Response"+(i+1),u.ok);});
+      const qs=(a.ukq||[]).filter(u=>u.q||u.a);
+      if(qs.length>10)warn.push(qs.length+" knowledge questions but the form has room for 10 — questions 11+ are not on this form.");
+      qs.slice(0,10).forEach((u,i)=>{set(String(i+1),(u.q?u.q+" — ":"")+(u.a||"")); if(u.ok)set("Satisfactory Response"+(i+1),u.ok);});
       set("Feedback on answers received",a.feedbackText||"");
     }
   }
-  if(/Assessor Sign-Off/.test(kind)){
-    set("Assessor Name",assessor); set("Assessor Signtaure Date",todayISO()); set("Assessor Signature Date",todayISO());
-    const pairs=signedSignOffPairs(p);
-    const byComp=new Map(); pairs.forEach(pr=>{if(!byComp.has(pr.comp.id))byComp.set(pr.comp.id,[]); byComp.get(pr.comp.id).push(pr);});
+  if(isSO){
+    const prsAll=ag?ag.pairs:[];
+    const byComp=new Map(); prsAll.forEach(pr=>{if(!byComp.has(pr.comp.id))byComp.set(pr.comp.id,[]); byComp.get(pr.comp.id).push(pr);});
     const overflow=[];
     for(let rowIdx=0;rowIdx<COMPS.length;rowIdx++){
       const comp=COMPS[rowIdx]; const prs=byComp.get(comp.id)||[]; if(!prs.length)continue;
       if(rowIdx>17){overflow.push(comp); continue;}
-      const labelField=signOffFieldNames(rowIdx,1).label;
-      if(labelField)set(labelField,compShortId(comp));
+      const fn1=signOffFieldNames(rowIdx,1);
+      if(fn1.label)set(fn1.label,compShortId(comp));
       for(const pr of prs){
         const actIdx=Math.max(1,Math.min(3,Number(pr.act.n)||1));
         const fn=signOffFieldNames(rowIdx,actIdx);
-        const dateStr=String(pr.sel.signedAt||todayISO()).slice(0,10);
-        set(fn.date,dateStr);
         const blobId=pr.sel.blobId||(pr.act.assessorSig&&pr.act.assessorSig.blobId);
-        if(blobId)await drawSigAtField(pdf,form,fn.sig,blobId,filled);
-        // All criteria covered for this competence in this activity?
-        const critIds=plannedCritForComp(p,pr.act,comp).map(k=>k.id); /* v0.2.17: all planned criteria of this competence, so an unsigned one shows No */
-        const allSigned=critIds.length&&critIds.every(cid=>cov(p,cid,pr.act.id).status==="Signed");
-        set(signOffFieldNames(rowIdx,1).all,allSigned?"Yes":"No");
-        if((pr.act.ukq||[]).some(u=>u.q||u.a))set(signOffFieldNames(rowIdx,1).know,"Yes");
+        if(blobId&&await drawSigAtField(pdf,form,fn.sig,blobId,filled))set(fn.date,ukDate(pr.sel.signedAt));
       }
+      set(fn1.all,compAllCovered(p,comp)?"Yes":"No");
+      set(fn1.know,compKnowledge(p,comp)?"Yes":"No");
     }
     if(overflow.length)warn.push(overflow.length+" signed competence(s) have no row left on the sign-off form: "+overflow.map(c=>compShortId(c)).join(", "));
+    if(entry.key)warn.push("More than one assessor signed — a separate sign-off form is made for each assessor ("+(ag&&ag.name||"unnamed")+" on this one).");
+    if(ag&&ag.blobId&&await tryPlaceSig(pdf,form,ag.blobId,"assessor",assessor,"",filled)){set("Assessor Signtaure Date",ukDate(ag.signedAt)); set("Assessor Signature Date",ukDate(ag.signedAt));}
   }
-  // signatures: only when explicitly signed
-  let candPlaced=false, assPlaced=false;
-  const includeCand=!!(a&&a.candidateSignedAt&&S.profile.signatureBlobId);
-  const assActForSig=/Assessor Sign-Off/.test(kind)?(p.activities.find(x=>x.assessorSig)||a):a;
-  const includeAss=!!(assActForSig&&assActForSig.assessorSig&&assActForSig.assessorSig.blobId);
-  if(includeCand)candPlaced=await tryPlaceSig(pdf,form,S.profile.signatureBlobId,"candidate",cand,todayISO(),filled);
-  if(includeAss)assPlaced=await tryPlaceSig(pdf,form,assActForSig.assessorSig.blobId,"assessor",assessor,todayISO(),filled);
+  if(isRoW&&entry.witness){
+    const w=entry.witness;
+    set("Witness Name",String(w.name||"").toUpperCase()); set("Witness Job Role",w.jobRole); set("Witness Email",w.email); set("Contact Number",w.phone);
+    const sigs=(entry.wsigs||[]).filter(x=>x.sig&&x.sig.blobId);
+    for(const {act:sa,sig} of sigs){
+      const rowIdx=COMPS.findIndex(c=>c.id===sig.compId); if(rowIdx<0)continue;
+      if(rowIdx>17){warn.push("Competence "+compShortId(COMPS[rowIdx])+" has no row on the Record of Witness.");continue;}
+      const actIdx=Math.max(1,Math.min(3,Number(sa.n)||1)); const fn=signOffFieldNames(rowIdx,actIdx);
+      if(fn.label)set(fn.label,compShortId(COMPS[rowIdx]));
+      if(await drawSigAtField(pdf,form,fn.sig,sig.blobId,filled))set(fn.date,ukDate(sig.signedAt));
+    }
+    const last=sigs.slice().sort((x,y)=>String(y.sig.signedAt).localeCompare(String(x.sig.signedAt)))[0];
+    if(last&&await drawSigAtField(pdf,form,"Witness Signature",last.sig.blobId,filled))set("Witness Signature Date",ukDate(last.sig.signedAt));
+    if(!sigs.length)warn.push("Witness "+(w.name||"")+" has not signed any competence yet.");
+  }
+  // candidate signature: only when explicitly signed; date beside it only when placed
+  const candActs=isSO||isRoW?(entry.acts||p.activities).filter(x=>x.candidateSignedAt):(a&&a.candidateSignedAt?[a]:[]);
+  const candSig=p.signatureBlobId!==undefined?p.signatureBlobId:S.profile.signatureBlobId;
+  if(candActs.length&&candSig){const at=candActs.map(x=>x.candidateSignedAt).sort().slice(-1)[0];if(await tryPlaceSig(pdf,form,candSig,"candidate",cand,"",filled))set("Candidate Signature Date",ukDate(at));}
+  if(!isSO&&!isRoW&&a&&a.assessorSig&&a.assessorSig.blobId){if(await tryPlaceSig(pdf,form,a.assessorSig.blobId,"assessor",assessor,"",filled)){set("Assessor Signature Date",ukDate(a.assessorSig.signedAt));}}
   /* v0.2.14: no appended non-official pages on any form. */
   try{if(form)form.updateFieldAppearances();}catch(_){}
   return {blob:new Blob([await pdf.save()],{type:"application/pdf"}),filled,appended,warnings:warn};
@@ -988,8 +1080,8 @@ async function buildSubmissionPack(p,scopeActId){
   for(const entry of sum.forms){
     try{
       const r=await fillFormForSubmission(entry,p);
-      const a=entry.act; const folder=root+"/Forms/"+(a?("Activity-"+a.n):"Portfolio");
-      const fname=(a?("A"+a.n+"_"):"")+safeName(entry.label||entry.kind)+"_"+safeName(entry.tpl.fileName);
+      const a=entry.act; const folder=root+"/Forms/"+(a&&!/Record of Witness|Assessor Sign-Off/.test(entry.kind)?("Activity-"+a.n):"Portfolio");
+      const fname=(a&&!/Record of Witness|Assessor Sign-Off/.test(entry.kind)?("A"+a.n+"_"):"")+safeName(entry.label||entry.kind)+"_"+safeName(entry.tpl.fileName);r.warnings.forEach(w=>{const m=(entry.label||entry.kind)+(a?" (Activity "+a.n+")":"")+": "+w;if(!sum.warnings.includes(m))sum.warnings.push(m);});
       zip.file(folder+"/"+fname,r.blob);
       fillLog.push(entry.tpl.fileName+" (Activity "+(a?a.n:"-")+", "+entry.kind+"): FILLED fields ["+r.filled.join("; ")+"]"+(r.appended.length?" APPENDED ["+r.appended.join("; ")+"]":"")+(r.warnings.length?" WARNINGS ["+r.warnings.join("; ")+"]":""));
       manifestRows.push({path:folder+"/"+fname,activity:a?("Activity "+a.n):"Portfolio",criteria:a?planCritOf(p,a).map(k=>k.id).join(" "):"",evidenceCode:"form",status:entry.kind});
@@ -1011,8 +1103,8 @@ try{const pdf=await PDFLib.PDFDocument.load(await blob.arrayBuffer()),form=pdf.g
 set("Candidate Name",p?p.name:"");set("Candidate name",p?p.name:"");set("Date",todayISO());set("Date_2",todayISO());
 if(a){set("Activity Number 12 or 3",a.n);set("Work activity to be assessed",a.summary||a.title);try{const t=planCritText(planCritOf(p,a));if(t)setAutoFit(form,"Which performance criteria in the competences do you intend to assess",t,[],[]);}catch(_){}set("What date or dates will the assessment take place",a.dates);set("Where will the assessment take place eg name of vessel installation system workshop etc",a.where);set("Witness name if applicable",a.witness);set("Assessor name",a.assessorName);set("Please specify the reasons for your decision",a.feedbackText);set("Candidates comments",a.candidateComments);}
 let sigNote="";
-if(ui.fillSig&&S.profile.signatureBlobId){try{const sigBlob=await blobGet(S.profile.signatureBlobId);if(sigBlob){const png=await pdf.embedPng(await sigBlob.arrayBuffer());let placed=false;
-try{const fields=form.getFields();const sf=fields.find(f=>/^candidate signature$/i.test(f.getName().trim()));if(sf&&sf.acroField&&sf.acroField.getWidgets().length){const w=sf.acroField.getWidgets()[0];const rect=w.getRectangle();const page=pdf.getPages().find(pg=>pg.ref===w.P());if(page&&rect&&rect.width>10){await drawSigInRect(pdf,page,rect,S.profile.signatureBlobId,png);placed=true;}}}catch(_){}
+if(ui.fillSig&&CS().signatureBlobId){try{const sigBlob=await blobGet(CS().signatureBlobId);if(sigBlob){const png=await pdf.embedPng(await sigBlob.arrayBuffer());let placed=false;
+try{const fields=form.getFields();const sf=fields.find(f=>/^candidate signature$/i.test(f.getName().trim()));if(sf&&sf.acroField&&sf.acroField.getWidgets().length){const w=sf.acroField.getWidgets()[0];const rect=w.getRectangle();const page=pdf.getPages().find(pg=>pg.ref===w.P());if(page&&rect&&rect.width>10){await drawSigInRect(pdf,page,rect,CS().signatureBlobId,png);placed=true;}}}catch(_){}
 if(!placed){sigNote=" This form has no candidate signature field, so no signature was added.";}
 else sigNote=" Signature added at the form signature field.";}}catch(se){sigNote=" Signature could not be added ("+se.message+").";}}
 downloadBlob(new Blob([await pdf.save()],{type:"application/pdf"}),t.fileName.replace(/\.pdf$/i,"")+"_FILLED.pdf");toast("Filled copy downloaded. Stored blank unchanged."+sigNote);}
@@ -1122,7 +1214,7 @@ else if(a==="pdf-next"&&ui.pdfPreview){ui.pdfPreview.idx=Math.min(ui.pdfPreview.
 else if(a==="pdf-thumb"&&ui.pdfPreview){ui.pdfPreview.idx=Number(el.dataset.idx)||0;render();}
 else if(a==="submission-export"&&p){const sc=el.dataset.act||null;const sum0=buildSubmissionSummary(p,sc);if(sum0.warnings.length){ui.subScope=sc;toast("Check the preview warnings before exporting.");await buildPdfPreview(sc,false);}else{ui.subScope=sc;const r=await buildSubmissionPack(p,sc);await exportZip(r.zip,"MTCS_Submission_"+safeName(p.name)+".zip");ui.modal=null;toast("Submission pack downloaded \u2014 send it to MTCS yourself; the app has not submitted anything.");render();}}
 else if(a==="submission-export-do"&&p){if(ui.pdfPreview)ui.subScope=ui.pdfPreview.scopeActId;const sum1=buildSubmissionSummary(p,ui.subScope);if(sum1.warnings.length&&!(document.getElementById("sub-confirm")||{}).checked){toast("Tick \u2018I\u2019ve checked these warnings\u2019 first.");return;}const r=await buildSubmissionPack(p,ui.subScope);await exportZip(r.zip,"MTCS_Submission_"+safeName(p.name)+".zip");ui.modal=null;ui.pdfPreview=null;toast("Submission pack downloaded \u2014 send it to MTCS yourself; the app has not submitted anything.");render();}
-else if(a==="candidate-sign"&&p){const act=actOf(p,el.dataset.act);if(act&&S.profile.signatureBlobId){act.candidateSignedAt=new Date().toISOString();act.sigAudit=act.sigAudit||[];act.sigAudit.push({who:"candidate",name:p.name,at:act.candidateSignedAt,source:"profile"});save();toast("You signed Activity "+act.n+" \u2014 your Profile signature will be applied to its paperwork on export.");render();}}
+else if(a==="candidate-sign"&&p){const act=actOf(p,el.dataset.act);if(act&&CS().signatureBlobId){act.candidateSignedAt=new Date().toISOString();act.sigAudit=act.sigAudit||[];act.sigAudit.push({who:"candidate",name:p.name,at:act.candidateSignedAt,source:"profile"});save();toast("You signed Activity "+act.n+" \u2014 your Profile signature will be applied to its paperwork on export.");render();}}
 else if(a==="candidate-unsign"&&p){const act=actOf(p,el.dataset.act);if(act){act.candidateSignedAt=null;save();toast("Candidate signature removed from this activity.");render();}}
 else if(a==="assessor-sign-open"&&p){ui.assessorSignAct=el.dataset.act;ui.assessorFlow={actId:el.dataset.act,step:1,mode:"select",selected:new Set()};ui.modal="assessor-sign";render();}
 else if(a==="assessor-mode"&&ui.assessorFlow){ui.assessorFlow.mode=el.dataset.mode;render();}
@@ -1131,8 +1223,8 @@ else if(a==="assessor-back"&&ui.assessorFlow){ui.assessorFlow.step=1;render();}
 else if(a==="assessor-sign-save"&&p){const c=document.getElementById("assessor-sig-pad");const nameEl=document.getElementById("assessor-sig-name");if(!c||!c.dataset.dirty){toast("Draw the assessor signature first, or upload an image.");return;}const blob=await new Promise(r=>c.toBlob(r,"image/png"));if(!blob){toast("Could not save that drawing.");return;}const bid=uid("asig");await blobSet(bid,blob);setSigMeta(bid,"assessor");await applyAssessorSigning(p,bid,"drawn",nameEl?nameEl.value.trim():"");}
 else if(a==="sig-replace"){ui.sigPadOpen=true;render();}
 else if(a==="sig-cancel-pad"){ui.sigPadOpen=false;render();}
-else if(a==="sig-clear"){if(confirm("Clear your saved signature from this device? Forms already downloaded keep theirs.")){const old=S.profile.signatureBlobId;S.profile.signatureBlobId=null;S.profile.signatureUpdatedAt=null;ui.sigUrl=null;ui.sigPadOpen=true;if(old&&!blobIsReferenced(old,null)){try{await blobDel(old);}catch(_){}}save();toast("Signature cleared.");render();}}
-else if(a==="sig-save"){const c=document.getElementById("sig-pad");if(!c||!c.dataset.dirty){toast("Draw your signature first.");return;}const blob=await new Promise(r=>c.toBlob(r,"image/png"));if(!blob){toast("Could not save that drawing.");return;}const old=S.profile.signatureBlobId,newId=uid("sig");await blobSet(newId,blob);setSigMeta(newId,"candidate");S.profile.signatureBlobId=newId;S.profile.signatureUpdatedAt=new Date().toISOString();if(old&&old!==newId){try{await blobDel(old);}catch(_){}if(S.profile.sigMeta)delete S.profile.sigMeta[old];}if(ui.sigUrl)URL.revokeObjectURL(ui.sigUrl);ui.sigUrl=URL.createObjectURL(blob);ui.sigPadOpen=false;save();toast("Signature saved on this device.");render();}
+else if(a==="sig-clear"){if(confirm("Clear your saved signature from this device? Forms already downloaded keep theirs.")){const old=CS().signatureBlobId;CS().signatureBlobId=null;CS().signatureUpdatedAt=null;ui.sigUrl=null;ui.sigPadOpen=true;if(old&&!blobIsReferenced(old,null)){try{await blobDel(old);}catch(_){}}save();toast("Signature cleared.");render();}}
+else if(a==="sig-save"){const c=document.getElementById("sig-pad");if(!c||!c.dataset.dirty){toast("Draw your signature first.");return;}const blob=await new Promise(r=>c.toBlob(r,"image/png"));if(!blob){toast("Could not save that drawing.");return;}const old=CS().signatureBlobId,newId=uid("sig");await blobSet(newId,blob);setSigMeta(newId,"candidate");CS().signatureBlobId=newId;CS().signatureUpdatedAt=new Date().toISOString();if(old&&old!==newId&&!blobIsReferenced(old,null)){try{await blobDel(old);}catch(_){}if(S.profile.sigMeta)delete S.profile.sigMeta[old];}if(ui.sigUrl)URL.revokeObjectURL(ui.sigUrl);ui.sigUrl=URL.createObjectURL(blob);ui.sigUrlFor=CS().signatureBlobId;ui.sigPadOpen=false;save();toast("Signature saved on this device.");render();}
 else if(a==="cancel-backup-import"){ui.pendingBackup=null;render();}
 else if(a==="confirm-backup-import"){await applyBackup(ui.pendingBackup);}
 else if(a==="cancel-return"){ui.pendingReturn=null;render();}
@@ -1153,7 +1245,7 @@ else if(a==="bulk-signed-confirm"){applyBulk(true);}
 else if(a==="plan-edit"){ui.planOpen=true;render();}
 else if(a==="plan-done"){ui.planOpen=false;render();}
 else if(a==="confirm-copied"&&p){const act=actOf(p,el.dataset.act);act.copiedUnconfirmed=false;save();toast("Plan checked.");render();}
-else if(a==="copy-plan"&&p){const from=actOf(p,el.dataset.from),act=actOf(p,el.dataset.act);if(from&&act){act.summary=from.summary;act.where=from.where;act.witness=from.witness;act.assessorName=from.assessorName;act.planText=from.planText;Object.entries(p.criteria).forEach(([cid,by])=>{const src=by[from.id];if(src){p.criteria[cid][act.id]={status:"Planned",code:src.code};}});act.planCritIds=[...(from.planCritIds||[])];act.copiedFrom=from.n;act.copiedUnconfirmed=true;ui.planOpen=true;save();toast("Plan copied from Activity "+from.n+" — check dates, place and people.",false);render();}}
+else if(a==="copy-plan"&&p){const from=actOf(p,el.dataset.from),act=actOf(p,el.dataset.act);if(from&&act){act.summary=from.summary;act.where=from.where;act.witness=from.witness;act.witnessId=from.witnessId||"";act.assessorName=from.assessorName;act.planText=from.planText;Object.entries(p.criteria).forEach(([cid,by])=>{const src=by[from.id];if(src){p.criteria[cid][act.id]={status:"Planned",code:src.code};}});act.planCritIds=[...(from.planCritIds||[])];act.copiedFrom=from.n;act.copiedUnconfirmed=true;ui.planOpen=true;save();toast("Plan copied from Activity "+from.n+" — check dates, place and people.",false);render();}}
 else if(a==="send-preflight"&&p){ui.preflightAct=el.dataset.act;ui.modal="preflight";render();}
 else if(a==="preflight-cancel"){ui.modal=null;ui.preflightAct=null;render();}
 else if(a==="preflight-continue"&&p){const act=actOf(p,ui.preflightAct);ui.modal=null;const stale=!S.settings.lastBackupAt||Date.now()-new Date(S.settings.lastBackupAt).getTime()>7*864e5;if(stale){await exportBackup();}if(act){const{zip}=await buildActivityZip(p,act,"activity-export");act.exportSeq++;save();await exportZip(zip,"Activity"+act.n+"_for_assessor.zip");toast(stale?"Backup downloaded first, then activity zip — send the activity zip to your assessor.":"Activity zip downloaded — send it to your assessor.");}ui.preflightAct=null;render();}
@@ -1162,7 +1254,7 @@ else if(a==="ev-edit"&&p){ui.evEditId=el.dataset.id;ui.pickerFor=el.dataset.id;u
 else if(a==="ev-edit-close"){ui.evEditId=null;ui.modal=null;render();}
 else if(a==="picker-toggle"){const ev=p.evidence.find(x=>x.id===ui.pickerFor);/* handled in change listener for checkboxes */}
 else if(a==="accept-suggest"&&p){const ev=p.evidence.find(x=>x.id===el.dataset.id);if(ev&&critById(el.dataset.crit)){ev.criteria=[...new Set([...ev.criteria,el.dataset.crit])];save();toast("Linked "+el.dataset.crit+" — check it in the editor before relying on it.");render();}}
-else if(a==="capture-note"&&p){const blob=new Blob(["Quick note captured in MTCS Tracker on "+new Date().toISOString()],{type:"text/plain"});const blobId=uid("blob");await blobSet(blobId,blob);const ev={id:uid("ev"),blobId,title:"Quick note",fileName:"quick-note.txt",mime:"text/plain",size:blob.size,date:todayISO(),tags:[],criteria:[],activityId:ui.captureAct||workActId(p),redact:false,createdAt:new Date().toISOString()};p.evidence.push(ev);ui.captureBatch=[ev.id];ui.captureLinks={[ev.id]:[]};ui.modal="link-sheet";save();render();}
+else if(a==="capture-note"&&p){const blob=new Blob(["Quick note captured in MTCS Tracker on "+new Date().toISOString()],{type:"text/plain"});const blobId=uid("blob");await blobSet(blobId,blob);const ev={id:uid("ev"),blobId,title:"Quick note",placeholder:true,fileName:"quick-note.txt",mime:"text/plain",size:blob.size,date:todayISO(),tags:[],criteria:[],activityId:ui.captureAct||workActId(p),redact:false,createdAt:new Date().toISOString()};p.evidence.push(ev);ui.captureBatch=[ev.id];ui.captureLinks={[ev.id]:[]};ui.modal="link-sheet";save();render();}
 else if(a==="batch-confirm"&&p){const actId=document.getElementById("batch-act")?document.getElementById("batch-act").value:workActId(p);const tags=String((document.getElementById("batch-tags")||{}).value||"").split(",").map(s=>s.trim()).filter(Boolean);let linked=0;ui.captureBatch.forEach(evid=>{const ev=p.evidence.find(x=>x.id===evid);if(!ev)return;ev.activityId=actId;if(tags.length)ev.tags=[...new Set([...ev.tags,...tags])];const crits=ui.captureLinks[evid]||[];crits.forEach(cid=>{if(!ev.criteria.includes(cid))ev.criteria.push(cid);setCov(p,cid,actId,{status:ui.batchStatus,code:ui.batchCode});linked++;});});S.settings.lastUsedCode=ui.batchCode;ui.captureBatch=[];ui.captureLinks={};ui.modal=null;save();toast(linked?("Linked "+linked+" criterion link(s). Files are saved on this device."):"Files saved on this device — link them from Evidence inbox when ready.");render();}
 else if(a==="batch-skip"){ui.captureBatch=[];ui.captureLinks={};ui.modal=null;toast("Files saved on this device — find them in Evidence inbox.");render();}
 else if(a==="crit-act"&&p){S.settings.critAct=el.dataset.act;save();render();}
@@ -1178,7 +1270,10 @@ else if(a==="portfolio-export"&&p){downloadBlob(await buildPortfolioZip(p),"MTCS
 else if(a==="smart-target"){if(ui.smartImport){ui.smartImport.target=el.dataset.t;ui.smartImport.sel={};render();}}
 else if(a==="smart-cancel"){ui.smartImport=null;render();}
 else if(a==="smart-apply"&&p){smartApply();}
-else if(a==="sign-lock"&&p){const act=actOf(p,el.dataset.act);CRITS.forEach(k=>{if(cov(p,k.id,act.id).status==="Evidenced")setCov(p,k.id,act.id,{status:"Signed"});});act.status="Signed";act.signedOn=todayISO();save();toast("Signed and locked (evidenced criteria marked Signed).");render();}
+else if(a==="witness-sign-open"&&p){const act=actOf(p,el.dataset.act);if(!act||!witnessOf(p,act.witnessId)){toast("Pick or add the witness first.");return;}ui.witnessFlow={actId:act.id,selected:new Set(plannedCompsFor(p,act).map(x=>x.comp.id))};ui.modal="witness-sign";render();}
+else if(a==="witness-sign-save"&&p&&ui.witnessFlow){const act=actOf(p,ui.witnessFlow.actId);const w=act&&witnessOf(p,act.witnessId);const c=document.getElementById("witness-sig-pad");if(!w)return;if(!ui.witnessFlow.selected.size){toast("Tick at least one competence the witness saw.");return;}if(!c||!c.dataset.dirty){toast("The witness needs to draw their signature first.");return;}const blob=await new Promise(r=>c.toBlob(r,"image/png"));if(!blob){toast("Could not save that drawing.");return;}const bid=uid("wsig");await blobSet(bid,blob);setSigMeta(bid,"witness");const at=new Date().toISOString();const cm=(document.getElementById("witness-comment")||{}).value||"";act.witnessSigs=(act.witnessSigs||[]).filter(x=>!(ui.witnessFlow.selected.has(x.compId)&&x.witnessId===w.id));[...ui.witnessFlow.selected].forEach(cid=>act.witnessSigs.push({compId:cid,witnessId:w.id,blobId:bid,signedAt:at,comment:cm.trim()}));act.sigAudit=act.sigAudit||[];act.sigAudit.push({who:"witness",name:w.name,at,activity:act.id,comps:[...ui.witnessFlow.selected]});const n=ui.witnessFlow.selected.size;ui.witnessFlow=null;ui.modal=null;save();toast(w.name+" signed "+n+" competence(s) for Activity "+act.n+". Their signature goes on the Record of Witness on export.");render();}
+else if(a==="witness-unsign"&&p){const act=actOf(p,el.dataset.act);if(act&&confirm("Remove this witness signature?")){act.witnessSigs.splice(Number(el.dataset.idx),1);save();render();}}
+else if(a==="sign-lock"&&p){const act=actOf(p,el.dataset.act);if(!act)return;if(!(act.assessorSig&&act.assessorSig.blobId)){toast("Sign & lock needs the assessor\u2019s signature first \u2014 use Assessor sign-off on this activity.");render();return;}CRITS.forEach(k=>{if(cov(p,k.id,act.id).status==="Evidenced")setCov(p,k.id,act.id,{status:"Signed"});});act.status="Signed";act.signedOn=todayISO();save();toast("Signed and locked (evidenced criteria marked Signed).");render();}
 });
 document.addEventListener("change",async e=>{const el=e.target,p=active();
 if(el.matches("[data-upload]")){const files=[...el.files];if(!files.length)return;try{
@@ -1188,7 +1283,7 @@ else if(el.dataset.upload==="evidence-for-comp"&&p){const actId=el.dataset.act||
 else if(el.dataset.upload==="evidence-for-crit"&&p){const added=await addEvidenceFiles(p,files,el.dataset.act||"");added.forEach(x=>{x.criteria=[...new Set([...x.criteria,el.dataset.crit])];});save();toast(added.length+" file(s) saved on device and linked to "+el.dataset.crit+".");}
 else if(el.dataset.upload==="pack"){for(const f of files)await importPackZip(f,el.dataset.packKey||undefined);maybeShowGenReview();}
 else if(el.dataset.upload==="assessor-signature"&&p){const f=files[0];const bmp=await createImageBitmap(f);const scale=Math.min(1,1200/Math.max(bmp.width,bmp.height));const cv=document.createElement("canvas");cv.width=Math.max(1,Math.round(bmp.width*scale));cv.height=Math.max(1,Math.round(bmp.height*scale));const cx=cv.getContext("2d");cx.fillStyle="#ffffff";cx.fillRect(0,0,cv.width,cv.height);cx.drawImage(bmp,0,0,cv.width,cv.height);const blob=await new Promise(r=>cv.toBlob(r,"image/png"));if(!blob)throw new Error("Could not read that image.");const nameEl=document.getElementById("assessor-sig-name");const bid=uid("asig");await blobSet(bid,blob);if(!ui.assessorFlow)ui.assessorFlow={actId:el.dataset.act||ui.assessorSignAct,step:2,mode:"all",selected:new Set()};await applyAssessorSigning(p,bid,"uploaded",nameEl?nameEl.value.trim():"");}
-else if(el.dataset.upload==="signature"){const f=files[0];const bmp=await createImageBitmap(f);const scale=Math.min(1,1200/Math.max(bmp.width,bmp.height));const cv=document.createElement("canvas");cv.width=Math.max(1,Math.round(bmp.width*scale));cv.height=Math.max(1,Math.round(bmp.height*scale));const cx=cv.getContext("2d");cx.fillStyle="#ffffff";cx.fillRect(0,0,cv.width,cv.height);cx.drawImage(bmp,0,0,cv.width,cv.height);const blob=await new Promise(r=>cv.toBlob(r,"image/png"));if(!blob)throw new Error("Could not read that image.");const old=S.profile.signatureBlobId,newId=uid("sig");await blobSet(newId,blob);S.profile.signatureBlobId=newId;S.profile.signatureUpdatedAt=new Date().toISOString();if(old&&old!==newId){try{await blobDel(old);}catch(_){}}if(ui.sigUrl)URL.revokeObjectURL(ui.sigUrl);ui.sigUrl=URL.createObjectURL(blob);ui.sigPadOpen=false;save();toast("Signature image saved on this device.");}
+else if(el.dataset.upload==="signature"){const f=files[0];const bmp=await createImageBitmap(f);const scale=Math.min(1,1200/Math.max(bmp.width,bmp.height));const cv=document.createElement("canvas");cv.width=Math.max(1,Math.round(bmp.width*scale));cv.height=Math.max(1,Math.round(bmp.height*scale));const cx=cv.getContext("2d");cx.fillStyle="#ffffff";cx.fillRect(0,0,cv.width,cv.height);cx.drawImage(bmp,0,0,cv.width,cv.height);const blob=await new Promise(r=>cv.toBlob(r,"image/png"));if(!blob)throw new Error("Could not read that image.");const old=CS().signatureBlobId,newId=uid("sig");await blobSet(newId,blob);CS().signatureBlobId=newId;CS().signatureUpdatedAt=new Date().toISOString();if(old&&old!==newId&&!blobIsReferenced(old,null)){try{await blobDel(old);}catch(_){}}if(ui.sigUrl)URL.revokeObjectURL(ui.sigUrl);ui.sigUrl=URL.createObjectURL(blob);ui.sigUrlFor=CS().signatureBlobId;ui.sigPadOpen=false;save();toast("Signature image saved on this device.");}
 else if(el.dataset.upload==="backup")ui.pendingBackup=await parseBackup(files[0]);
 else if(el.dataset.upload==="shared")await importSharedZip(files[0]);
 else if(el.dataset.upload==="portfolio-import")await importPortfolioZip(files[0]);
@@ -1210,7 +1305,7 @@ else if(el.matches("[data-forms-act]")){ui.formsAct=el.value;render();}
 else if(el.matches("[data-shared-crit]")){const x=S.shared.find(s=>s.id===el.dataset.sharedId);if(x){x.criteria[el.dataset.sharedCrit].status=el.value;save();}}
 else if(el.matches("[data-shared-code]")){const x=S.shared.find(s=>s.id===el.dataset.sharedId);if(x){x.criteria[el.dataset.sharedCode].code=el.value;save();}}
 });
-document.addEventListener("input",e=>{const p=active();
+document.addEventListener("input",e=>{const p=active();if(p&&e.target.matches&&e.target.matches("[data-wfield]")){const w=witnessOf(p,e.target.dataset.wid);if(w){w[e.target.dataset.wfield]=e.target.value;if(e.target.dataset.wfield==="name")p.activities.forEach(x=>{if(x.witnessId===w.id)x.witness=e.target.value;});save();}return;}
 if(e.target.matches("[data-profile-name]")){S.profile.name=e.target.value;if(p)p.name=e.target.value;save();return;}
 if(e.target.matches("[data-pbind]")&&p){p[e.target.dataset.pbind]=e.target.value;if(e.target.dataset.pbind==="name")S.profile.name=e.target.value;save();return;}
 if(e.target.matches("[data-afield]")&&p){const act=actOf(p,e.target.dataset.act);if(act){act[e.target.dataset.afield]=e.target.value;if(act.copiedUnconfirmed&&["summary","where","witness","assessorName"].includes(e.target.dataset.afield)){/* flag stays until confirmed */}save();}return;}
@@ -1231,6 +1326,8 @@ const bs=e.target.closest("[data-batch-status]");if(bs){ui.batchStatus=bs.datase
 const bc=e.target.closest("[data-batch-code]");if(bc){ui.batchCode=bc.dataset.batchCode;document.querySelectorAll("[data-batch-code]").forEach(b=>b.classList.toggle("on",b===bc));return;}
 });
 document.addEventListener("change",e=>{
+if(e.target.matches("[data-witness-comp]")&&ui.witnessFlow){if(e.target.checked)ui.witnessFlow.selected.add(e.target.dataset.witnessComp);else ui.witnessFlow.selected.delete(e.target.dataset.witnessComp);return;}
+if(e.target.matches("[data-witness-pick]")){const p=active(),act=p&&actOf(p,e.target.dataset.act);if(!act)return;let v=e.target.value;if(v==="__new"){const nm=(prompt("Witness name")||"").trim();if(!nm){render();return;}const w={id:uid("wit"),name:nm,jobRole:"",email:"",phone:"",employer:""};p.witnesses=p.witnesses||[];p.witnesses.push(w);v=w.id;S.settings.cardOpen=S.settings.cardOpen||{};S.settings.cardOpen["work|witness-card"]=true;}const w=witnessOf(p,v);act.witnessId=w?w.id:"";act.witness=w?w.name:"";save();render();return;}
 if(e.target.matches("[data-assessor-comp]")&&ui.assessorFlow){const key=e.target.dataset.assessorComp;if(e.target.checked)ui.assessorFlow.selected.add(key);else ui.assessorFlow.selected.delete(key);const pairs=selectedSignOffPairs(active(),ui.assessorFlow);const critCount=pairs.reduce((n,x)=>n+x.crits.length,0);const elx=document.querySelector("[data-testid=assessor-sign-summary]");if(elx)elx.textContent="Signing will mark "+critCount+" planned criteria Signed (only planned criteria in the selected competencies, across "+pairs.length+" competence(s)) and add the assessor signature to every line that applies \u2014 the Assessor sign-off form per-competence Signature/Date fields and the other paperwork for those activities. Unplanned criteria will not be signed.";const nb=document.querySelector("[data-testid=assessor-sign-next]");if(nb)nb.disabled=ui.assessorFlow.mode==="select"&&!ui.assessorFlow.selected.size;return;}
 if(e.target.matches("[data-plan-crit]")&&ui.planBuilder){const id=e.target.dataset.planCrit;if(e.target.checked)ui.planBuilder.draft.add(id);else ui.planBuilder.draft.delete(id);updatePlanDom();return;}
 if(e.target.matches("[data-plan-comp]")&&ui.planBuilder){const comp=COMPS.find(c=>c.id===e.target.dataset.planComp);if(comp)comp.criteria.forEach(k=>{if(e.target.checked)ui.planBuilder.draft.add(k.id);else ui.planBuilder.draft.delete(k.id);});updatePlanDom();return;}
@@ -1264,7 +1361,7 @@ if(page==="settings"||page==="profile"||page==="feedback"){if(dx>=70&&sx<=64)loc
 const cur={"":"",dashboard:"#/dashboard",work:"#/work",activities:"#/work",activity:"#/work",criteria:"#/criteria",matrix:"#/criteria",more:"#/more"}[page]||"";const idx=NAV_TABS.indexOf(cur);if(idx<0)return;const next=NAV_TABS[(idx+(dx<0?1:NAV_TABS.length-1))%NAV_TABS.length];location.hash=next;},{passive:true});
 (async function boot(){document.getElementById("app").innerHTML=`<div class="landing"><div class="card">Loading your portfolios from this browser…</div></div>`;
 try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persisted().then(x=>x||navigator.storage.persist()).catch(()=>{});}catch(_){} /* v0.2.18: ask for persistent storage (Safari 7-day eviction) */
-try{await idbOpen();S.portfolios=(await kvGet("portfolios"))||[];S.templates=(await kvGet("templates"))||[];S.packImports=(await kvGet("packImports"))||[];S.shared=(await kvGet("shared"))||[];S.genPacks=(await kvGet("genPacks"))||[];S.profile=Object.assign(S.profile,(await kvGet("profile"))||{});S.settings=Object.assign(S.settings,(await kvGet("settings"))||{});S.feedbackQueue=(await kvGet("feedbackQueue"))||[];setTimeout(()=>retryFeedbackQueue(false),1500);await cleanupPackData();cleanupPortfolioPeople();migrateLegacyPortfolios();if(S.profile.signatureBlobId){blobGet(S.profile.signatureBlobId).then(b=>{if(b){ui.sigUrl=URL.createObjectURL(b);render();}}).catch(()=>{});}}catch(e){console.error("IndexedDB unavailable",e);}
+try{await idbOpen();S.portfolios=(await kvGet("portfolios"))||[];S.templates=(await kvGet("templates"))||[];S.packImports=(await kvGet("packImports"))||[];S.shared=(await kvGet("shared"))||[];S.genPacks=(await kvGet("genPacks"))||[];S.profile=Object.assign(S.profile,(await kvGet("profile"))||{});S.settings=Object.assign(S.settings,(await kvGet("settings"))||{});S.feedbackQueue=(await kvGet("feedbackQueue"))||[];setTimeout(()=>retryFeedbackQueue(false),1500);await cleanupPackData();cleanupPortfolioPeople();migrateLegacyPortfolios();}catch(e){console.error("IndexedDB unavailable",e);}
 render();cloudBoot();})();
-window.__mtcsQA={buildSubmissionPack,blobSet:(i,b)=>blobSet(i,b),signOffFieldNames,get S(){return S;},get ui(){return ui;},render:()=>render(),signedSignOffPairs:p=>signedSignOffPairs(p),active:()=>active(),get COMPS(){return COMPS;},get CRITS(){return CRITS;},fillFormForSubmission,blobGet,save:()=>save(),buildBackupBlob,planCritText,capFieldFont};
+window.__mtcsQA={buildSubmissionPack,blobSet:(i,b)=>blobSet(i,b),signOffFieldNames,get S(){return S;},get ui(){return ui;},render:()=>render(),signedSignOffPairs:p=>signedSignOffPairs(p),active:()=>active(),get COMPS(){return COMPS;},get CRITS(){return CRITS;},fillFormForSubmission,blobGet,save:()=>save(),buildBackupBlob,planCritText,capFieldFont,totals:p=>totals(p),setCov:(p,c,a,x)=>setCov(p,c,a,x),compLabel:c=>compLabel(c),compShortId:c=>compShortId(c),routeAbbr:n=>routeAbbr(n),submissionFormsPlan:(p,s)=>submissionFormsPlan(p,s),buildSubmissionSummary:(p,s)=>buildSubmissionSummary(p,s),actRowPct:(p,a)=>actRowPct(p,a),ukDate:i=>ukDate(i),migrate:()=>migrateLegacyPortfolios()};
 })();
