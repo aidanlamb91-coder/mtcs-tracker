@@ -731,3 +731,6 @@ details.ag-plan[open]>summary::after{content:"▴"}
 .meter.ok{background:linear-gradient(90deg,var(--signed) 0 var(--d),#e3e8ec var(--d) 100%)}
 /* item 6: icon-only add button */
 .btn.icon-btn{width:34px;min-width:34px;padding:0;font-size:1.25rem;font-weight:800;line-height:1;display:inline-grid;place-items:center}
+/* v0.2.25 auto-backup status */
+.ab-status{margin-left:8px;font-size:.78rem}
+.ab-paused{border:1px solid var(--mapped-dot,#c98a00);background:#fff8e6;color:#7a5200;border-radius:999px;padding:2px 10px;font-size:.78rem;cursor:pointer}

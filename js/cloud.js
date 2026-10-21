@@ -2,7 +2,10 @@
  * What: the same full-backup .zip that "Back up now" downloads, saved as MTCS-Tracker-backup.zip in
  *   Google Drive: a visible "MTCS Tracker" folder in My Drive (scope drive.file = the app only sees files it made).
  *   OneDrive:     the app's own folder, Apps / MTCS Tracker (Graph special folder "approot").
- * Sign-in: full-page redirect back to this page. Google: response_type=token (no secret possible on a website).
+ * Sign-in: full-page redirect back to this page. Google (v0.2.25 "connect once"): authorisation code + PKCE; the
+ *   mtcs-forms-fetch Worker holds the client secret and swaps the code / refreshes. The device keeps only a sealed
+ *   refresh token (encrypted by the Worker, useless without it). If the Worker is unreachable we fall back to the old
+ *   browser token flow (response_type=token, ~1 h).
  *   OneDrive: code + PKCE (S256), refresh token kept so backups keep working without signing in again.
  * Tokens are kept in this browser's localStorage only and never leave it except to Google/Microsoft. */
 (function (global) {
@@ -24,7 +27,7 @@
   let busy = false;
   function status() {
     const s = load();
-    return { connected: !!s.kind, kind: s.kind || null, label: s.kind ? KINDS[s.kind].label : null, email: s.email || "",
+    return { silent: !!s.grt || s.kind === "onedrive", connected: !!s.kind, kind: s.kind || null, label: s.kind ? KINDS[s.kind].label : null, email: s.email || "",
       folderName: s.kind === "onedrive" ? "Apps / MTCS Tracker" : FOLDER_NAME, lastBackupAt: s.lastBackupAt || null,
       cloudSize: s.cloudSize ?? null, cloudUpdatedAt: s.cloudUpdatedAt || null, needsSignIn: !!s.needsSignIn, busy, lastError: s.lastError || null };
   }
@@ -35,14 +38,17 @@
   async function challengeFor(v) { const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v)); return b64url(new Uint8Array(d)); }
 
   /** Build the authorise URL and remember what we were doing. Returns { url, pending } (does not navigate). */
-  async function buildAuthUrl(kind, mode, resume) {
+  async function buildAuthUrl(kind, mode, resume, opts) {
     if (!CFG().isConfigured(kind)) throw new Error("Cloud sign-in is not set up yet for " + KINDS[kind].label + ".");
     const state = randomString(16), redirect = CFG().redirectUri();
     const pending = { kind, state, mode: mode || "connect", resume: resume || null, back: global.location.hash || "#/more", at: Date.now() };
     let url;
     if (kind === "google") {
-      const p = new URLSearchParams({ client_id: CFG().config.googleClientId, redirect_uri: redirect, response_type: "token", scope: GOOGLE_SCOPES, include_granted_scopes: "true", state });
-      if (mode === "renew") { p.set("prompt", "none"); const s = load(); if (s.email && /@/.test(s.email)) p.set("login_hint", s.email); } else p.set("prompt", "select_account");
+      const useCode = (opts && opts.legacy) ? false : await workerOk();
+      const p = new URLSearchParams({ client_id: CFG().config.googleClientId, redirect_uri: redirect, response_type: useCode ? "code" : "token", scope: GOOGLE_SCOPES, include_granted_scopes: "true", state });
+      if (useCode) { pending.verifier = randomString(48); pending.flow = "code"; p.set("code_challenge", await challengeFor(pending.verifier)); p.set("code_challenge_method", "S256"); p.set("access_type", "offline"); }
+      const s0 = load(); if (s0.email && /@/.test(s0.email)) p.set("login_hint", s0.email);
+      if (mode === "renew" && !useCode) p.set("prompt", "none"); else p.set("prompt", useCode ? "consent select_account" : "select_account");
       url = GOOGLE_AUTH + "?" + p;
     } else {
       pending.verifier = randomString(48);
@@ -51,8 +57,13 @@
     }
     return { url, pending };
   }
-  async function startSignIn(kind, mode, resume) {
-    const { url, pending } = await buildAuthUrl(kind, mode, resume);
+  const WORKER = () => (CFG().config.workerBase || "").replace(/\/$/, "");
+  let workerSeen = null;
+  async function workerOk() { if (workerSeen !== null) return workerSeen; if (!WORKER()) return (workerSeen = false);
+    try { const r = await fetch(WORKER() + "/google/health", { method: "GET" }); const j = await r.json().catch(() => ({})); workerSeen = r.ok && !!j.google; } catch (_) { workerSeen = false; } return workerSeen; }
+  async function workerPost(path, body) { const r = await fetch(WORKER() + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch (_) {} return { status: r.status, j }; }
+  async function startSignIn(kind, mode, resume, opts) {
+    const { url, pending } = await buildAuthUrl(kind, mode, resume, opts);
     localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
     global.location.assign(url);
     return new Promise(() => {});
@@ -90,8 +101,12 @@
       if (pending.mode === "renew") { save({ needsSignIn: true }); return { kind, mode: pending.mode, error: "Sign in again to continue." }; }
       return { kind, mode: pending.mode, error: L.error === "access_denied" ? "Sign-in cancelled." : "Sign-in failed (" + L.error + ")." };
     }
-    if (kind === "google") {
-      save({ kind, access: L.access_token, expiresAt: now + (Number(L.expires_in) || 3600) * 1000, refresh: null, needsSignIn: false, lastError: null });
+    if (kind === "google" && pending.flow === "code") {
+      let r; try { r = await workerPost("/google/token", { code: L.code, code_verifier: pending.verifier, redirect_uri: CFG().redirectUri() }); } catch (e) { r = { status: 0, j: {} }; }
+      if (r.status !== 200 || !r.j.access_token) return { kind, mode: pending.mode, error: "Google sign-in failed" + (r.j.error ? " (" + r.j.error + ")" : "") + " — try Connect again." };
+      save({ kind, access: r.j.access_token, expiresAt: now + (Number(r.j.expires_in) || 3600) * 1000, refresh: null, grt: r.j.sealed_refresh || null, needsSignIn: false, lastError: null });
+    } else if (kind === "google") {
+      save({ kind, access: L.access_token, expiresAt: now + (Number(L.expires_in) || 3600) * 1000, refresh: null, grt: null, needsSignIn: false, lastError: null });
     } else {
       const r = await postForm(MS_AUTH + "/token", { client_id: CFG().config.oneDriveClientId, grant_type: "authorization_code", code: L.code, redirect_uri: CFG().redirectUri(), code_verifier: pending.verifier, scope: ONEDRIVE_SCOPES });
       let j = {}; try { j = JSON.parse(r.body); } catch (_) {}
@@ -114,7 +129,16 @@
   async function token(force) {
     const s = load(), now = Date.now();
     if (!force && s.access && !(s.expiresAt && s.expiresAt <= now + EARLY_MS)) return s.access;
-    if (s.kind === "google") { await startSignIn("google", "renew", resumeFor); throw new SignInRequired(); }
+    if (s.kind === "google") {
+      if (s.grt) { /* v0.2.25: silent renewal through the Worker */
+        let r; try { r = await workerPost("/google/refresh", { sealed_refresh: s.grt }); } catch (e) { throw new Error("Network error while renewing sign-in"); }
+        if (r.status === 200 && r.j.access_token) { save({ access: r.j.access_token, grt: r.j.sealed_refresh || s.grt, expiresAt: now + (Number(r.j.expires_in) || 3600) * 1000, needsSignIn: false }); return r.j.access_token; }
+        if (r.status === 400 || r.status === 401) { save({ grt: null, needsSignIn: true }); throw new SignInRequired(); }
+        throw new Error("Sign-in renewal failed (HTTP " + r.status + ")");
+      }
+      /* old token flow: never jump to Google in the middle of an automatic backup */
+      if (!interactive) { save({ needsSignIn: true }); throw new SignInRequired(); }
+      await startSignIn("google", "renew", resumeFor); throw new SignInRequired(); }
     if (!s.refresh) throw new SignInRequired();
     let r; try { r = await postForm(MS_AUTH + "/token", { client_id: CFG().config.oneDriveClientId, grant_type: "refresh_token", refresh_token: s.refresh, scope: ONEDRIVE_SCOPES }); }
     catch (e) { throw new Error("Network error while renewing sign-in"); }
@@ -123,7 +147,7 @@
     if (/invalid_grant|interaction_required|login_required|consent_required/i.test(r.body)) throw new SignInRequired();
     throw new Error("Sign-in renewal failed (HTTP " + r.status + ")");
   }
-  let resumeFor = null;
+  let resumeFor = null, interactive = true;
   async function api(url, init, as) {
     const call = async tok => {
       const res = await fetch(url, { ...(init || {}), headers: { ...((init && init.headers) || {}), Authorization: "Bearer " + tok } });
@@ -198,18 +222,19 @@
   async function folderId() { const s = load(); if (s.folderId) return s.folderId; const f = await provider().ensureFolder(); save({ folderId: f.id }); return f.id; }
 
   /** Upload the given backup zip blob (the same file "Back up now" downloads). */
-  async function backup(blob) {
+  async function backup(blob, opts) {
     const s = load(); if (!s.kind) return { error: "Not connected." }; if (busy) return { skipped: true };
+    if (opts && opts.auto && s.needsSignIn) return { paused: true };
     if (!navigator.onLine) { save({ lastError: "You're offline — try again when you have a connection." }); return { offline: true, error: "You're offline." }; }
-    busy = true; resumeFor = "backup"; emit();
+    busy = true; resumeFor = "backup"; interactive = !(opts && opts.auto); emit();
     try {
       const fid = await folderId(), p = provider();
       const existing = (await p.list(fid)).find(f => f.name === ZIP_NAME);
       const out = await p.write(fid, blob, existing && existing.id);
       save({ lastBackupAt: Date.now(), cloudSize: out.size, cloudUpdatedAt: out.modified, lastError: null, needsSignIn: false });
       return { ok: true, size: blob.size };
-    } catch (e) { if (e instanceof SignInRequired) save({ needsSignIn: true }); const msg = friendly(e); save({ lastError: msg }); return { error: msg, signIn: e instanceof SignInRequired }; }
-    finally { busy = false; resumeFor = null; emit(); }
+    } catch (e) { if (e instanceof SignInRequired) save({ needsSignIn: true }); const msg = friendly(e); save({ lastError: msg }); return { error: msg, signIn: e instanceof SignInRequired, offline: e instanceof TypeError || !navigator.onLine }; }
+    finally { busy = false; resumeFor = null; interactive = true; emit(); }
   }
   /** Download the cloud backup zip (the caller shows the usual "Import this backup?" review). */
   async function download() {
@@ -221,8 +246,11 @@
     } catch (e) { if (e instanceof SignInRequired) save({ needsSignIn: true }); const msg = friendly(e); save({ lastError: msg }); return { error: msg }; }
     finally { busy = false; resumeFor = null; emit(); }
   }
-  async function disconnect() { const s = load(); if (s.kind === "google" && s.access) await google.revoke(s.access); localStorage.removeItem(STATE_KEY); emit(); }
+  async function disconnect() { const s = load();
+    if (s.kind === "google" && s.grt) { try { await workerPost("/google/revoke", { sealed_refresh: s.grt }); } catch (_) {} }
+    else if (s.kind === "google" && s.access) await google.revoke(s.access);
+    localStorage.removeItem(STATE_KEY); emit(); }
 
   global.MtcsCloud = { KINDS, FOLDER_NAME, ZIP_NAME, GOOGLE_SCOPES, ONEDRIVE_SCOPES, status, onChange: fn => (listeners.add(fn), () => listeners.delete(fn)),
-    buildAuthUrl, startSignIn, completeRedirect, backup, download, disconnect, friendly, _internal: { load, save, challengeFor, b64url, hasLanded: () => !!landed } };
+    buildAuthUrl, startSignIn, completeRedirect, workerOk, backup, download, disconnect, friendly, _internal: { load, save, challengeFor, b64url, hasLanded: () => !!landed } };
 })(window);
