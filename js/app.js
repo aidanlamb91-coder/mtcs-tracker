@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.20";
+const APP_VERSION="0.2.21";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -601,6 +601,8 @@ function refreshPackImport(k,zipName,importedAt){const count=S.templates.filter(
 function migrateLegacyPortfolios(){let changed=false;
 /* v0.2.20: copy the old shared Profile signature into each existing portfolio (once). */
 if(!S.settings.sigPerPortfolio){S.portfolios.forEach(pf=>{if(!("signatureBlobId" in pf)||pf.signatureBlobId==null){pf.signatureBlobId=S.profile.signatureBlobId||null;pf.signatureUpdatedAt=S.profile.signatureUpdatedAt||null;}});S.settings.sigPerPortfolio=true;changed=true;}
+/* v0.2.21: one-time status normalisation — Evidenced without a real code (none, N/C, N/A) becomes Planned. */
+if(!S.settings.statusNorm021){S.portfolios.forEach(pf=>Object.values(pf.criteria||{}).forEach(by=>Object.values(by||{}).forEach(c=>{if(c&&c.status==="Evidenced"&&!REAL_CODES.includes(c.code))c.status="Planned";})));S.settings.statusNorm021=true;changed=true;}
 S.portfolios.forEach(pf=>{if(!("signatureBlobId" in pf)){pf.signatureBlobId=null;changed=true;}if(!Array.isArray(pf.witnesses)){pf.witnesses=[];changed=true;}(pf.activities||[]).forEach(a=>{if(!Array.isArray(a.witnessSigs)){a.witnessSigs=[];changed=true;}if(a.witness&&!a.witnessId){const nm=String(a.witness).trim();let w=pf.witnesses.find(x=>x.name.trim().toUpperCase()===nm.toUpperCase());if(!w){w={id:uid("wit"),name:nm,jobRole:"",email:"",phone:"",employer:""};pf.witnesses.push(w);}a.witnessId=w.id;changed=true;}});});
 S.portfolios.forEach(pf=>{
 if(pf.genPackId&&!(S.genPacks||[]).some(g=>g.id===pf.genPackId)){pf.genPackId=null;changed=true;}
@@ -768,10 +770,10 @@ function submissionFormsPlan(p,scopeActId){
     findAll(/CandidateTestimony/i).forEach(tpl=>out.push({tpl,act:a,kind:"Candidate Testimony",label:"Candidate testimony"}));
   });
   /* v0.2.20: one Record of Witness per witness (not per activity) */
-  witnessGroups(p,acts).forEach((g,i)=>findAll(/Record_of_Witness/i).slice(0,1).forEach(tpl=>out.push({tpl,act:null,acts,witness:g.w,wsigs:g.sigs,kind:"Record of Witness",key:"w"+i,label:"Record of witness \u00b7 "+(g.w.name||"Witness")})));
+  witnessGroups(p,acts).forEach((g,i)=>findAll(/Record_of_Witness/i).slice(0,1).forEach(tpl=>{const ch=[...new Set(g.sigs.map(x=>actChunk(x.act)))].sort((x,y)=>x-y);(ch.length?ch:[0]).forEach(c=>out.push({tpl,act:null,acts,witness:g.w,wsigs:g.sigs.filter(x=>actChunk(x.act)===c),chunk:c,kind:"Record of Witness",key:"w"+i+"c"+c,label:"Record of witness \u00b7 "+(g.w.name||"Witness")+(c?" \u00b7 Activities "+(c*3+1)+"-"+(c*3+3):"")}));}));
   /* v0.2.20 item 7: one sign-off per assessor */
   const _ag=signOffAssessors(p,acts);
-  findAll(/Assessor_SignOff/i).forEach(tpl=>{if(!seenSignOff.has(tpl.id)){seenSignOff.add(tpl.id);if(_ag.length<=1)out.push({tpl,act:acts[0]||null,acts,assessor:_ag[0]||null,kind:"Assessor Sign-Off",label:"Assessor sign-off"});else _ag.forEach((g,i)=>out.push({tpl,act:acts[0]||null,acts,assessor:g,key:"a"+i,kind:"Assessor Sign-Off",label:"Assessor sign-off \u00b7 "+(g.name||"Assessor "+(i+1))}));}});
+  findAll(/Assessor_SignOff/i).forEach(tpl=>{if(!seenSignOff.has(tpl.id)){seenSignOff.add(tpl.id);if(!_ag.length)out.push({tpl,act:acts[0]||null,acts,assessor:null,chunk:0,kind:"Assessor Sign-Off",label:"Assessor sign-off"});else _ag.forEach((g,i)=>{const ch=[...new Set(g.pairs.map(x=>actChunk(x.act)))].sort((x,y)=>x-y);ch.forEach(c=>out.push({tpl,act:acts[0]||null,acts,assessor:g,chunk:c,multi:_ag.length>1,key:"a"+i+"c"+c,kind:"Assessor Sign-Off",label:"Assessor sign-off"+(_ag.length>1?" \u00b7 "+(g.name||"Assessor "+(i+1)):"")+(c?" \u00b7 Activities "+(c*3+1)+"-"+(c*3+3):"")}));});}});
   const seen=new Set(); return out.filter(o=>{const k=(o.act?o.act.id:"-")+"|"+o.kind+"|"+o.tpl.fileName+"|"+(o.key||""); if(seen.has(k))return false; seen.add(k); if(o.act&&(o.act.planCritIds||[]).length&&/Assessment Plan|Feedback|Competence|UKQ/.test(o.kind)&&!critsForForm(p,o.act,o.tpl,o.kind).length)return false; return true;});
 }
 function evidenceZipPath(p,e,used){
@@ -829,7 +831,17 @@ function signedSignOffPairs(p){
 /* Short competence identifier for the 36pt Comp cell (form pre-prints 1-3 for Core). */
 const compShortId=c=>(c.unitId==="core"?"":routeAbbr(c.unitShort))+String(c.number||"");
 /* v0.2.20: UK (Europe/London) date dd/mm/yyyy for dates beside a real signature. */
+/* v0.2.21: map criteria to "Type of Evidence…" fields one-to-one — exact full-text match first, then the longest unique common prefix. */
+function evidenceFieldMap(crits,names){const norm=t=>String(t).toLowerCase().replace(/^type of evidence/,"").replace(/[^a-z0-9]/g,"");const fl=names.map(n=>({n,t:norm(n)}));const out={};const used=new Set();
+  crits.forEach(k=>{const t=norm(k.text);const ex=fl.filter(f=>!used.has(f.n)&&f.t===t);if(ex.length===1){out[k.id]=ex[0].n;used.add(ex[0].n);}});
+  const lcp=(x,y)=>{let i=0;while(i<x.length&&i<y.length&&x[i]===y[i])i++;return i;};
+  let progress=true;while(progress){progress=false;const left=crits.filter(k=>!out[k.id]);for(const k of left){const t=norm(k.text);const sc=fl.filter(f=>!used.has(f.n)).map(f=>({f,l:lcp(t,f.t)})).sort((x,y)=>y.l-x.l);if(!sc.length||sc[0].l<12)continue;if(sc[1]&&sc[1].l===sc[0].l)continue;
+    /* the field must also prefer this criterion over the other unmatched ones */const rival=left.filter(o=>o!==k).some(o=>lcp(norm(o.text),sc[0].f.t)>=sc[0].l);if(rival)continue;out[k.id]=sc[0].f.n;used.add(sc[0].f.n);progress=true;}}
+  return out;}
 function ukDate(iso){try{const d=new Date(iso);if(isNaN(d))return "";return d.toLocaleDateString("en-GB",{timeZone:"Europe/London",day:"2-digit",month:"2-digit",year:"numeric"});}catch(_){return "";}}
+/* v0.2.21: a form has 3 activity columns; activity 4+ goes on another copy of the form, never over column 3. */
+const actChunk=a=>Math.floor((Math.max(1,Number(a&&a.n)||1)-1)/3);
+const actCol=a=>((Math.max(1,Number(a&&a.n)||1)-1)%3)+1;
 const witnessOf=(p,id)=>(p.witnesses||[]).find(w=>w.id===id)||null;
 const actWitness=(p,a)=>a?(witnessOf(p,a.witnessId)||(a.witness?{id:"",name:a.witness,jobRole:"",email:"",phone:"",employer:""}:null)):null;
 const assessorKey=(name,blobId)=>String(name||"").trim().toUpperCase()||("SIG:"+(blobId||""));
@@ -975,7 +987,7 @@ async function fillFormForSubmission(entry,p){
   /* v0.2.20 item 9: warn when text cannot fit even at the 6pt minimum */
   const set=(n,v)=>{if(v==null||v==="")return; if(!form)return; try{const tf=form.getTextField(n); const fit=capFieldFont(tf,String(v)); tf.setText(String(v)); if(fit===false)warn.push("Text in '"+n+"' is too long to fit at the 6pt minimum and may be cut off — shorten it."); if(!filled.includes(n))filled.push(n);}catch(_){}};
   const isRoW=/Record of Witness/.test(kind), isSO=/Assessor Sign-Off/.test(kind), isTest=/Candidate Testimony/.test(kind);
-  const ag=isSO?(entry.assessor!==undefined?entry.assessor:(signOffAssessors(p,entry.acts||null)[0]||null)):null;
+  const ag=isSO?(entry.assessor!==undefined?entry.assessor:(signOffAssessors(p,entry.acts||null)[0]||null)):null; if(isSO&&entry.chunk==null)entry=Object.assign({},entry,{chunk:0});
   const cand=(p.name||"").toUpperCase();
   const assessor=(isSO?((ag&&ag.name)||""):((a&&a.assessorName)||(a&&a.assessorSig&&a.assessorSig.name)||p.assessedBy||"")).toUpperCase();
   const crits=critsForForm(p,a,tpl,kind);
@@ -1004,6 +1016,7 @@ async function fillFormForSubmission(entry,p){
       const wfb=[...new Set((a.witnessSigs||[]).map(x=>String(x.comment||"").trim()).filter(Boolean))].join("\n");
       set("Feedback completed by AssessorWitnessRow1",wfb);
       if(ws&&await drawSigAtField(pdf,form,"AssessorWitness_2",ws.blobId,filled))set("Date_3",ukDate(ws.signedAt));
+      {const cs=p.signatureBlobId!==undefined?p.signatureBlobId:S.profile.signatureBlobId;if(a.candidateSignedAt&&cs&&await drawSigAtField(pdf,form,"Candidate",cs,filled))set("Date_2",ukDate(a.candidateSignedAt));}
     }
     if(/Feedback/i.test(kind)){
       const entries=crits.map(k=>cov(p,k.id,a.id)); const hasSig=!!(a.assessorSig&&a.assessorSig.blobId);
@@ -1015,9 +1028,9 @@ async function fillFormForSubmission(entry,p){
     }
     if(entry.comp){
       /* v0.2.20 item 10: match by field name (criterion text), not field order */
-      try{const norm=t=>String(t).toLowerCase().replace(/[^a-z0-9]/g,"");const tof=(form?form.getFields():[]).filter(f=>/^Type of Evidence/i.test(f.getName()));const used=new Set();
-        entry.comp.criteria.forEach(k=>{const cv=cov(p,k.id,a.id); if(!cv.code)return; const key=norm(k.text).slice(0,25); const f=key?tof.find(x=>!used.has(x)&&norm(x.getName()).includes(key)):null;
-          if(!f){warn.push(k.id+": no matching 'Type of Evidence' field on this form — code "+cv.code+" not filled.");return;} used.add(f); try{f.setText(cv.code); filled.push(k.id+" evidence code ("+cv.code+")");}catch(_){}});}catch(e){warn.push("Competence code fill: "+e.message);}
+      try{const tof=(form?form.getFields():[]).filter(f=>/^Type of Evidence/i.test(f.getName()));const map=evidenceFieldMap(entry.comp.criteria,tof.map(f=>f.getName()));
+        entry.comp.criteria.forEach(k=>{const cv=cov(p,k.id,a.id); if(!cv.code)return; const nm=map[k.id]; const f=nm&&tof.find(x=>x.getName()===nm);
+          if(!f){warn.push(k.id+": no matching 'Type of Evidence' field on this form — code "+cv.code+" not filled.");return;} try{f.setText(cv.code); filled.push(k.id+" evidence code ("+cv.code+")");}catch(_){}});}catch(e){warn.push("Competence code fill: "+e.message);}
     }
     if(/^UKQ/i.test(kind)){
       const qs=(a.ukq||[]).filter(u=>u.q||u.a);
@@ -1027,7 +1040,8 @@ async function fillFormForSubmission(entry,p){
     }
   }
   if(isSO){
-    const prsAll=ag?ag.pairs:[];
+    const prsAll=ag?ag.pairs.filter(pr=>entry.chunk==null||actChunk(pr.act)===entry.chunk):[];
+    if(entry.chunk)warn.push("Activities "+(entry.chunk*3+1)+"-"+(entry.chunk*3+3)+" are on this extra copy of the form: its columns 1-3 mean those activities — relabel the column headings by hand.");
     const byComp=new Map(); prsAll.forEach(pr=>{if(!byComp.has(pr.comp.id))byComp.set(pr.comp.id,[]); byComp.get(pr.comp.id).push(pr);});
     const overflow=[];
     for(let rowIdx=0;rowIdx<COMPS.length;rowIdx++){
@@ -1036,8 +1050,7 @@ async function fillFormForSubmission(entry,p){
       const fn1=signOffFieldNames(rowIdx,1);
       if(fn1.label)set(fn1.label,compShortId(comp));
       for(const pr of prs){
-        const actIdx=Math.max(1,Math.min(3,Number(pr.act.n)||1));
-        const fn=signOffFieldNames(rowIdx,actIdx);
+        const fn=signOffFieldNames(rowIdx,actCol(pr.act));
         const blobId=pr.sel.blobId||(pr.act.assessorSig&&pr.act.assessorSig.blobId);
         if(blobId&&await drawSigAtField(pdf,form,fn.sig,blobId,filled))set(fn.date,ukDate(pr.sel.signedAt));
       }
@@ -1045,7 +1058,7 @@ async function fillFormForSubmission(entry,p){
       set(fn1.know,compKnowledge(p,comp)?"Yes":"No");
     }
     if(overflow.length)warn.push(overflow.length+" signed competence(s) have no row left on the sign-off form: "+overflow.map(c=>compShortId(c)).join(", "));
-    if(entry.key)warn.push("More than one assessor signed — a separate sign-off form is made for each assessor ("+(ag&&ag.name||"unnamed")+" on this one).");
+    if(entry.multi)warn.push("More than one assessor signed — a separate sign-off form is made for each assessor ("+(ag&&ag.name||"unnamed")+" on this one).");
     if(ag&&ag.blobId&&await tryPlaceSig(pdf,form,ag.blobId,"assessor",assessor,"",filled)){set("Assessor Signtaure Date",ukDate(ag.signedAt)); set("Assessor Signature Date",ukDate(ag.signedAt));}
   }
   if(isRoW&&entry.witness){
@@ -1055,12 +1068,13 @@ async function fillFormForSubmission(entry,p){
     for(const {act:sa,sig} of sigs){
       const rowIdx=COMPS.findIndex(c=>c.id===sig.compId); if(rowIdx<0)continue;
       if(rowIdx>17){warn.push("Competence "+compShortId(COMPS[rowIdx])+" has no row on the Record of Witness.");continue;}
-      const actIdx=Math.max(1,Math.min(3,Number(sa.n)||1)); const fn=signOffFieldNames(rowIdx,actIdx);
+      const fn=signOffFieldNames(rowIdx,actCol(sa));
       if(fn.label)set(fn.label,compShortId(COMPS[rowIdx]));
       if(await drawSigAtField(pdf,form,fn.sig,sig.blobId,filled))set(fn.date,ukDate(sig.signedAt));
     }
     const last=sigs.slice().sort((x,y)=>String(y.sig.signedAt).localeCompare(String(x.sig.signedAt)))[0];
     if(last&&await drawSigAtField(pdf,form,"Witness Signature",last.sig.blobId,filled))set("Witness Signature Date",ukDate(last.sig.signedAt));
+    if(entry.chunk)warn.push("Activities "+(entry.chunk*3+1)+"-"+(entry.chunk*3+3)+" are on this extra copy of the Record of Witness: its columns 1-3 mean those activities — relabel the column headings by hand.");
     if(!sigs.length)warn.push("Witness "+(w.name||"")+" has not signed any competence yet.");
   }
   // candidate signature: only when explicitly signed; date beside it only when placed
@@ -1273,7 +1287,7 @@ else if(a==="smart-apply"&&p){smartApply();}
 else if(a==="witness-sign-open"&&p){const act=actOf(p,el.dataset.act);if(!act||!witnessOf(p,act.witnessId)){toast("Pick or add the witness first.");return;}ui.witnessFlow={actId:act.id,selected:new Set(plannedCompsFor(p,act).map(x=>x.comp.id))};ui.modal="witness-sign";render();}
 else if(a==="witness-sign-save"&&p&&ui.witnessFlow){const act=actOf(p,ui.witnessFlow.actId);const w=act&&witnessOf(p,act.witnessId);const c=document.getElementById("witness-sig-pad");if(!w)return;if(!ui.witnessFlow.selected.size){toast("Tick at least one competence the witness saw.");return;}if(!c||!c.dataset.dirty){toast("The witness needs to draw their signature first.");return;}const blob=await new Promise(r=>c.toBlob(r,"image/png"));if(!blob){toast("Could not save that drawing.");return;}const bid=uid("wsig");await blobSet(bid,blob);setSigMeta(bid,"witness");const at=new Date().toISOString();const cm=(document.getElementById("witness-comment")||{}).value||"";act.witnessSigs=(act.witnessSigs||[]).filter(x=>!(ui.witnessFlow.selected.has(x.compId)&&x.witnessId===w.id));[...ui.witnessFlow.selected].forEach(cid=>act.witnessSigs.push({compId:cid,witnessId:w.id,blobId:bid,signedAt:at,comment:cm.trim()}));act.sigAudit=act.sigAudit||[];act.sigAudit.push({who:"witness",name:w.name,at,activity:act.id,comps:[...ui.witnessFlow.selected]});const n=ui.witnessFlow.selected.size;ui.witnessFlow=null;ui.modal=null;save();toast(w.name+" signed "+n+" competence(s) for Activity "+act.n+". Their signature goes on the Record of Witness on export.");render();}
 else if(a==="witness-unsign"&&p){const act=actOf(p,el.dataset.act);if(act&&confirm("Remove this witness signature?")){act.witnessSigs.splice(Number(el.dataset.idx),1);save();render();}}
-else if(a==="sign-lock"&&p){const act=actOf(p,el.dataset.act);if(!act)return;if(!(act.assessorSig&&act.assessorSig.blobId)){toast("Sign & lock needs the assessor\u2019s signature first \u2014 use Assessor sign-off on this activity.");render();return;}CRITS.forEach(k=>{if(cov(p,k.id,act.id).status==="Evidenced")setCov(p,k.id,act.id,{status:"Signed"});});act.status="Signed";act.signedOn=todayISO();save();toast("Signed and locked (evidenced criteria marked Signed).");render();}
+else if(a==="sign-lock"&&p){const act=actOf(p,el.dataset.act);if(!act)return;if(!(act.assessorSig&&act.assessorSig.blobId)){toast("Sign & lock needs the assessor\u2019s signature first \u2014 use Assessor sign-off on this activity.");render();return;}/* v0.2.21: only criteria the assessor selected, and only ones that are really done under the status rule */const _sel=new Set();(act.signOffSelections||[]).forEach(x=>(x.criteriaIds||[]).forEach(id=>_sel.add(id)));CRITS.forEach(k=>{if(_sel.has(k.id)&&cov(p,k.id,act.id).status!=="Signed"&&covDone(p,k.id,act.id))setCov(p,k.id,act.id,{status:"Signed"});});act.status="Signed";act.signedOn=todayISO();save();toast("Signed and locked (evidenced criteria marked Signed).");render();}
 });
 document.addEventListener("change",async e=>{const el=e.target,p=active();
 if(el.matches("[data-upload]")){const files=[...el.files];if(!files.length)return;try{
@@ -1327,7 +1341,7 @@ const bc=e.target.closest("[data-batch-code]");if(bc){ui.batchCode=bc.dataset.ba
 });
 document.addEventListener("change",e=>{
 if(e.target.matches("[data-witness-comp]")&&ui.witnessFlow){if(e.target.checked)ui.witnessFlow.selected.add(e.target.dataset.witnessComp);else ui.witnessFlow.selected.delete(e.target.dataset.witnessComp);return;}
-if(e.target.matches("[data-witness-pick]")){const p=active(),act=p&&actOf(p,e.target.dataset.act);if(!act)return;let v=e.target.value;if(v==="__new"){const nm=(prompt("Witness name")||"").trim();if(!nm){render();return;}const w={id:uid("wit"),name:nm,jobRole:"",email:"",phone:"",employer:""};p.witnesses=p.witnesses||[];p.witnesses.push(w);v=w.id;S.settings.cardOpen=S.settings.cardOpen||{};S.settings.cardOpen["work|witness-card"]=true;}const w=witnessOf(p,v);act.witnessId=w?w.id:"";act.witness=w?w.name:"";save();render();return;}
+if(e.target.matches("[data-witness-pick]")){const p=active(),act=p&&actOf(p,e.target.dataset.act);if(!act)return;let v=e.target.value;if(v==="__new"){const nm=(prompt("Witness name")||"").trim();if(!nm){render();return;}const w={id:uid("wit"),name:nm,jobRole:"",email:"",phone:"",employer:""};p.witnesses=p.witnesses||[];p.witnesses.push(w);v=w.id;S.settings.cardOpen=S.settings.cardOpen||{};S.settings.cardOpen["work|witness-card"]=true;}const w=witnessOf(p,v);const oldId=act.witnessId||"";if(oldId!==(w?w.id:"")){/* v0.2.21: the old witness's signatures and comments come off this activity */act.witnessSigs=(act.witnessSigs||[]).filter(x=>w&&x.witnessId===w.id);}act.witnessId=w?w.id:"";act.witness=w?w.name:"";save();render();return;}
 if(e.target.matches("[data-assessor-comp]")&&ui.assessorFlow){const key=e.target.dataset.assessorComp;if(e.target.checked)ui.assessorFlow.selected.add(key);else ui.assessorFlow.selected.delete(key);const pairs=selectedSignOffPairs(active(),ui.assessorFlow);const critCount=pairs.reduce((n,x)=>n+x.crits.length,0);const elx=document.querySelector("[data-testid=assessor-sign-summary]");if(elx)elx.textContent="Signing will mark "+critCount+" planned criteria Signed (only planned criteria in the selected competencies, across "+pairs.length+" competence(s)) and add the assessor signature to every line that applies \u2014 the Assessor sign-off form per-competence Signature/Date fields and the other paperwork for those activities. Unplanned criteria will not be signed.";const nb=document.querySelector("[data-testid=assessor-sign-next]");if(nb)nb.disabled=ui.assessorFlow.mode==="select"&&!ui.assessorFlow.selected.size;return;}
 if(e.target.matches("[data-plan-crit]")&&ui.planBuilder){const id=e.target.dataset.planCrit;if(e.target.checked)ui.planBuilder.draft.add(id);else ui.planBuilder.draft.delete(id);updatePlanDom();return;}
 if(e.target.matches("[data-plan-comp]")&&ui.planBuilder){const comp=COMPS.find(c=>c.id===e.target.dataset.planComp);if(comp)comp.criteria.forEach(k=>{if(e.target.checked)ui.planBuilder.draft.add(k.id);else ui.planBuilder.draft.delete(k.id);});updatePlanDom();return;}
@@ -1363,5 +1377,5 @@ const cur={"":"",dashboard:"#/dashboard",work:"#/work",activities:"#/work",activ
 try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persisted().then(x=>x||navigator.storage.persist()).catch(()=>{});}catch(_){} /* v0.2.18: ask for persistent storage (Safari 7-day eviction) */
 try{await idbOpen();S.portfolios=(await kvGet("portfolios"))||[];S.templates=(await kvGet("templates"))||[];S.packImports=(await kvGet("packImports"))||[];S.shared=(await kvGet("shared"))||[];S.genPacks=(await kvGet("genPacks"))||[];S.profile=Object.assign(S.profile,(await kvGet("profile"))||{});S.settings=Object.assign(S.settings,(await kvGet("settings"))||{});S.feedbackQueue=(await kvGet("feedbackQueue"))||[];setTimeout(()=>retryFeedbackQueue(false),1500);await cleanupPackData();cleanupPortfolioPeople();migrateLegacyPortfolios();}catch(e){console.error("IndexedDB unavailable",e);}
 render();cloudBoot();})();
-window.__mtcsQA={buildSubmissionPack,blobSet:(i,b)=>blobSet(i,b),signOffFieldNames,get S(){return S;},get ui(){return ui;},render:()=>render(),signedSignOffPairs:p=>signedSignOffPairs(p),active:()=>active(),get COMPS(){return COMPS;},get CRITS(){return CRITS;},fillFormForSubmission,blobGet,save:()=>save(),buildBackupBlob,planCritText,capFieldFont,totals:p=>totals(p),setCov:(p,c,a,x)=>setCov(p,c,a,x),compLabel:c=>compLabel(c),compShortId:c=>compShortId(c),routeAbbr:n=>routeAbbr(n),submissionFormsPlan:(p,s)=>submissionFormsPlan(p,s),buildSubmissionSummary:(p,s)=>buildSubmissionSummary(p,s),actRowPct:(p,a)=>actRowPct(p,a),ukDate:i=>ukDate(i),migrate:()=>migrateLegacyPortfolios()};
+window.__mtcsQA={buildSubmissionPack,blobSet:(i,b)=>blobSet(i,b),signOffFieldNames,get S(){return S;},get ui(){return ui;},render:()=>render(),signedSignOffPairs:p=>signedSignOffPairs(p),active:()=>active(),get COMPS(){return COMPS;},get CRITS(){return CRITS;},fillFormForSubmission,blobGet,save:()=>save(),buildBackupBlob,planCritText,capFieldFont,totals:p=>totals(p),setCov:(p,c,a,x)=>setCov(p,c,a,x),compLabel:c=>compLabel(c),compShortId:c=>compShortId(c),routeAbbr:n=>routeAbbr(n),submissionFormsPlan:(p,s)=>submissionFormsPlan(p,s),buildSubmissionSummary:(p,s)=>buildSubmissionSummary(p,s),actRowPct:(p,a)=>actRowPct(p,a),ukDate:i=>ukDate(i),migrate:()=>migrateLegacyPortfolios(),evidenceFieldMap:(c,n)=>evidenceFieldMap(c,n)};
 })();
