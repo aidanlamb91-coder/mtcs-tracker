@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.18";
+const APP_VERSION="0.2.19";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -704,7 +704,13 @@ ${hasSig&&!ui.sigPadOpen?`${ui.sigUrl?`<img src="${ui.sigUrl}" alt="Your saved s
 function submissionFormsPlan(p,scopeActId){
   const acts=scopeActId?p.activities.filter(a=>String(a.id)===String(scopeActId)):p.activities;
   const out=[]; const seenSignOff=new Set();
-  const findAll=rx=>S.templates.filter(x=>rx.test(x.fileName));
+  // v0.2.19: only this portfolio's own packs (route + Core). Safe fallback: templates from unknown/"imported" packs,
+  // never another known route's pack. Own-pack copies always win over fallback copies.
+  const own=knownDownloadPacks(p)||((genPackOf(p)||{}).sourcePackKeys)||[];
+  const KNOWN=/^(g1|g2|snr)-|^party-chief$|^client-rep$/;
+  const pool=S.templates.filter(x=>own.includes(x.packKey)||!KNOWN.test(x.packKey||""));
+  const rank=x=>own.includes(x.packKey)?own.indexOf(x.packKey):99;
+  const findAll=rx=>{const m=pool.filter(x=>rx.test(x.fileName));const o=m.filter(x=>own.includes(x.packKey));return (o.length?o:m).sort((a,b)=>rank(a)-rank(b));};
   acts.forEach(a=>{
     findAll(/AssessmentPlan/i).forEach(tpl=>out.push({tpl,act:a,kind:"Assessment Plan",label:"Assessment plan"}));
     planCritOf(p,a).forEach(k=>{});
@@ -712,11 +718,11 @@ function submissionFormsPlan(p,scopeActId){
     const compNums=new Map();
     COMPS.forEach(c=>{if(c.criteria.some(k=>(a.planCritIds||[]).includes(k.id)||cov(p,k.id,a.id).status!=="Gap"))compNums.set(c.fileName||c.id,c);});
     compNums.forEach(c=>{
-      const tpl=c.fileName?S.templates.find(x=>x.fileName===c.fileName):null;
+      const tpl=c.fileName?findAll(new RegExp("^"+c.fileName.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"$"))[0]||null:null;
       if(tpl)out.push({tpl,act:a,kind:"Competence "+(c.number||""),comp:c,label:simpleFormLabel("Competence",tpl,c)});
       const ukqNum=String(c.number||"").padStart(2,"0");
       const hasUkq=(a.ukq||[]).some(u=>u.q||u.a);
-      if(hasUkq){const ut=S.templates.find(x=>new RegExp("UKQ"+ukqNum+"\\.pdf$","i").test(x.fileName)&&(c.fileName?x.packKey===tpl?.packKey||true:true)); if(ut&&!out.some(o=>o.tpl.id===ut.id&&o.act.id===a.id))out.push({tpl:ut,act:a,kind:"UKQ "+ukqNum,comp:c,label:"Knowledge questions"});}
+      if(hasUkq){const _uk=findAll(new RegExp("UKQ"+ukqNum+"\\.pdf$","i")),_pre=c.fileName?c.fileName.replace(/_?Competence\d+\.pdf$/i,""):"";const ut=(tpl&&_uk.find(x=>x.packKey===tpl.packKey&&(!_pre||x.fileName.startsWith(_pre))))||(_pre&&_uk.find(x=>x.fileName.startsWith(_pre)))||(!c.fileName?_uk[0]:null); if(ut&&!out.some(o=>o.tpl.id===ut.id&&o.act.id===a.id))out.push({tpl:ut,act:a,kind:"UKQ "+ukqNum,comp:c,label:"Knowledge questions"});}
     });
     findAll(/FeedbackForm/i).forEach(tpl=>out.push({tpl,act:a,kind:"Feedback",label:"Feedback form"}));
     findAll(/CandidateTestimony/i).forEach(tpl=>out.push({tpl,act:a,kind:"Candidate Testimony",label:"Candidate testimony"}));
