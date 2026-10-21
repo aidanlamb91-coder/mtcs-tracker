@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.23";
+const APP_VERSION="0.2.24";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -356,9 +356,9 @@ const act=p?actOf(p,ui.formsAct||workActId(p)):null; if(p&&act)ui.formsAct=act.i
 const inPlayComps=act?COMPS.filter(comp=>comp.criteria.some(k=>cov(p,k.id,act.id).status!=="Gap")):[];
 const findStored=(rx)=>S.templates.filter(x=>rx.test(x.fileName));
 const shortlist=[];
-if(act){dlPacks.forEach(k=>{const tpl=S.templates.find(x=>x.packKey===k&&/AssessmentPlan/i.test(x.fileName))||findStored(/AssessmentPlan/i).find(x=>x.packKey===k);shortlist.push(["Assessment plan",tpl,k]);});
+if(act){const _hasR=inPlayComps.some(c=>c.unitId!=="core");const _one=dlPacks.filter(k=>(/core/i.test(k))!==_hasR).slice(0,1);const onePacks=_one.length?_one:dlPacks.slice(0,1); /* v0.2.24: one plan + one feedback per activity */onePacks.forEach(k=>{const tpl=S.templates.find(x=>x.packKey===k&&/AssessmentPlan/i.test(x.fileName))||findStored(/AssessmentPlan/i).find(x=>x.packKey===k);shortlist.push(["Assessment plan",tpl,k]);});
 inPlayComps.forEach(comp=>{const tpl=comp.fileName?S.templates.find(x=>x.fileName===comp.fileName):null;shortlist.push([compLabel(comp)+" \u00b7 "+comp.title,tpl,comp.unitId]);});
-dlPacks.forEach(k=>{const tpl=S.templates.find(x=>x.packKey===k&&/FeedbackForm/i.test(x.fileName));shortlist.push(["Feedback form",tpl,k]);});shortlist.push(["Assessor sign-off",findStored(/Assessor_SignOff/i)[0],null]);shortlist.push(["Record of witness",findStored(/Record_of_Witness/i)[0],null]);}
+onePacks.forEach(k=>{const tpl=S.templates.find(x=>x.packKey===k&&/FeedbackForm/i.test(x.fileName));shortlist.push(["Feedback form",tpl,k]);});shortlist.push(["Assessor sign-off",findStored(/Assessor_SignOff/i)[0],null]);shortlist.push(["Record of witness",findStored(/Record_of_Witness/i)[0],null]);}
 const fq=ui.formsSearch.toLowerCase();
 const storedList=S.templates.filter(x=>!fq||x.fileName.toLowerCase().includes(fq)).map(x=>`<li><span class="ev-ico">📄</span><div class="grow"><b class="small">${esc(x.fileName)}</b><div class="fname">${esc(x.packKey)} · ${(x.size/1024).toFixed(0)} KB · SHA-256 ${esc(x.sha256.slice(0,12))}…</div><div style="margin-top:4px">${storedBadge()}</div></div><div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn sm" data-action="open-template" data-id="${x.id}">Open blank</button><button class="btn sm primary" data-action="fill-template" data-id="${x.id}">Fill copy</button></div></li>`).join("");
 const tplList=Object.entries(MP).filter(([k,v])=>v.zip&&(!fq||(v.title||k).toLowerCase().includes(fq))).map(([k,v])=>{const st=packStatus(k);return `<li><span class="ev-ico">📄</span><div class="grow"><b class="small">${esc(v.title||k)}</b><div class="fname">Official pack zip from MTCS Online</div><div style="margin-top:4px">${st?storedBadge():notStoredBadge()}</div></div><a class="btn sm" href="${esc(v.zip)}" target="_blank" rel="noopener">Download from MTCS ↗</a></li>`;}).join("");
@@ -557,6 +557,7 @@ if(ui.modal==="ev-edit"){const p=active();const e=p.evidence.find(x=>x.id===ui.e
 <label class="checkline"><input type="checkbox" id="ev-redact" ${e.redact?"checked":""}> Flag: may contain client / sensitive data</label>
 <h3>Criteria</h3><p class="tiny muted">The Final links line is exactly what will be saved.</p>${pickerHTML(e.id,e.criteria,"data-picker-crit")}
 </div><footer><button class="btn" data-action="ev-edit-close">Cancel</button><button class="btn primary" data-action="ev-save" data-id="${e.id}" data-testid="ev-save">Save</button></footer></div>`;}
+if(ui.modal==="sign-skipped"&&ui.signSkipped){const L=ui.signSkipped.list||[];return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog" data-testid="sign-skipped"><header><h2>${ui.signSkipped.signed?"Signed — some criteria skipped":"Nothing signed"}</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><p class="small">${ui.signSkipped.signed?ui.signSkipped.signed+" criteria were signed. ":"None of the selected criteria are evidenced yet, so nothing was signed. "}These ${L.length} selected criteria were <b>not</b> signed, because only evidenced criteria can be signed off:</p><ul class="list small" data-testid="sign-skipped-list">${L.map(x=>`<li><b>${esc(x.id)}</b> (Activity ${esc(x.act)}) — ${esc(x.why)}</li>`).join("")}</ul></div><footer><button class="btn primary" data-action="close-modal" data-testid="sign-skipped-ok">OK</button></footer></div>`;}
 if(ui.modal==="preflight"){const p=active();const a=actOf(p,ui.preflightAct);if(a){const inAct=CRITS.filter(k=>cov(p,k.id,a.id).status!=="Gap");const gaps=CRITS.length-inAct.length;const evA=p.evidence.filter(e=>String(e.activityId)===String(a.id));const unlinked=evA.filter(e=>!e.criteria.length).length;const flagged=p.evidence.filter(e=>e.redact).length;const lb=S.settings.lastBackupAt;const age=lb?Math.floor((Date.now()-new Date(lb).getTime())/864e5):null;const packs=packStatus("g2-surveyor")&&packStatus("g2-core");
 return `<div class="scrim" data-action="close-modal"></div><div class="modal" role="dialog" data-testid="preflight"><header><h2>Send Activity ${a.n}?</h2><button class="close" data-action="close-modal">✕</button></header><div class="body"><ul class="list small">
 <li><span class="dot" style="background:${gaps||unlinked||flagged?"var(--mapped-dot)":"var(--signed)"}"></span><div class="grow"><b>${gaps} criteria not in this activity, ${unlinked} unlinked file(s) here, ${flagged} client-data flag(s) overall</b><div class="muted">Check flags before sharing outside your company.</div></div></li>
@@ -783,12 +784,15 @@ function submissionFormsPlan(p,scopeActId){
   const pool=S.templates.filter(x=>own.includes(x.packKey)||!KNOWN.test(x.packKey||""));
   const rank=x=>own.includes(x.packKey)?own.indexOf(x.packKey):99;
   const findAll=rx=>{const m=pool.filter(x=>rx.test(x.fileName));const o=m.filter(x=>own.includes(x.packKey));return (o.length?o:m).sort((a,b)=>rank(a)-rank(b));};
+  /* v0.2.24 item 1: ONE Assessment Plan + ONE Feedback form per activity. Core + route → the route pack's template (lists both); Core only → Core's; route only → route's. */
+  const isCoreTpl=t=>/core/i.test(t.packKey||"")||/CoreComp/i.test(t.fileName||"");
+  const pickOne=(rx,cs)=>{const all=findAll(rx);const route=all.filter(t=>!isCoreTpl(t)),core=all.filter(t=>isCoreTpl(t));const hasR=cs.some(c=>c.unitId!=="core"),hasC=cs.some(c=>c.unitId==="core");return (hasR?route[0]:hasC?core[0]:route[0])||all[0]||null;};
   acts.forEach(a=>{
-    findAll(/AssessmentPlan/i).forEach(tpl=>out.push({tpl,act:a,kind:"Assessment Plan",label:"Assessment plan"}));
-    planCritOf(p,a).forEach(k=>{});
     // competence + UKQ per competence in plan
     const compNums=new Map();
     COMPS.forEach(c=>{if(c.criteria.some(k=>(a.planCritIds||[]).includes(k.id)||cov(p,k.id,a.id).status!=="Gap"))compNums.set(c.fileName||c.id,c);});
+    const _cs=[...compNums.values()],_both=_cs.some(c=>c.unitId==="core")&&_cs.some(c=>c.unitId!=="core");
+    {const tpl=pickOne(/AssessmentPlan/i,_cs);if(tpl)out.push({tpl,act:a,kind:"Assessment Plan",label:"Assessment plan",combined:_both});}
     compNums.forEach(c=>{
       const tpl=c.fileName?findAll(new RegExp("^"+c.fileName.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"$"))[0]||null:null;
       if(tpl)out.push({tpl,act:a,kind:"Competence "+(c.number||""),comp:c,label:simpleFormLabel("Competence",tpl,c)});
@@ -796,7 +800,7 @@ function submissionFormsPlan(p,scopeActId){
       const hasUkq=(a.ukq||[]).some(u=>(u.q||u.a)&&(ukqForComp(u,c)||!ukqCompId(u))); /* v0.2.23 batch 3 item 8: no form for a competence with no questions (old unassigned questions still go everywhere, with a warning) */
       if(hasUkq){const _uk=findAll(new RegExp("UKQ"+ukqNum+"\\.pdf$","i")),_pre=c.fileName?c.fileName.replace(/_?Competence\d+\.pdf$/i,""):"";const ut=(tpl&&_uk.find(x=>x.packKey===tpl.packKey&&(!_pre||x.fileName.startsWith(_pre))))||(_pre&&_uk.find(x=>x.fileName.startsWith(_pre)))||(!c.fileName?_uk[0]:null); if(ut&&!out.some(o=>o.tpl.id===ut.id&&o.act.id===a.id))out.push({tpl:ut,act:a,kind:"UKQ "+ukqNum,comp:c,label:"Knowledge questions"});}
     });
-    findAll(/FeedbackForm/i).forEach(tpl=>out.push({tpl,act:a,kind:"Feedback",label:"Feedback form"}));
+    {const tpl=pickOne(/FeedbackForm/i,_cs);if(tpl)out.push({tpl,act:a,kind:"Feedback",label:"Feedback form",combined:_both});}
     findAll(/CandidateTestimony/i).forEach(tpl=>out.push({tpl,act:a,kind:"Candidate Testimony",label:"Candidate testimony"}));
   });
   /* v0.2.20: one Record of Witness per witness (not per activity) */
@@ -822,6 +826,7 @@ function evidenceZipPath(p,e,used){
 }
 function critsForForm(p,a,tpl,kind){
   const all=a?planCritOf(p,a):CRITS; if(!a||!tpl)return all;
+  if(/Assessment Plan|Feedback/i.test(kind||"")||/AssessmentPlan|FeedbackForm/i.test(tpl.fileName||""))return all; /* v0.2.24: one plan/feedback per activity lists Core + route */
   const isCore=/Core/i.test(tpl.fileName||"")||/core/i.test(tpl.packKey||"");
   const isRoleForm=/AssessmentPlan|FeedbackForm|Competence|UKQ/i.test(tpl.fileName||"")&&!/Core/i.test(tpl.fileName||"");
   if(isCore)return all.filter(k=>k.comp&&k.comp.unitId==="core");
@@ -910,13 +915,24 @@ async function drawSigAtField(pdf,form,fieldName,blobId,log){
 }
 
 function saveAssessorRecord(p,name){if(!String(name||"").trim())return;p.assessors=p.assessors||[];let r=assessorRec(p,name);if(!r){r={id:uid("asr"),name:String(name).trim(),jobRole:"",email:"",phone:"",employer:""};p.assessors.push(r);}["jobRole","email","phone","employer"].forEach(k=>{const el=document.getElementById("assessor-rec-"+k);if(el&&el.value.trim())r[k]=el.value.trim();});}
+function signSkipReason(p,id,actId){const c=cov(p,id,actId);if(c.status==="Signed")return"";const code=c.code||"";
+  if(code==="N/C")return"marked Not yet competent (N/C)";if(code==="N/A")return"marked Not applicable (N/A)";
+  if(covDone(p,id,actId))return"";const st=effStatus(c);
+  if(st!=="Evidenced")return"only Planned — no evidence recorded yet";
+  if(["P","W"].includes(code))return"no evidence file attached";
+  if(code==="Q")return"question not answered and ticked satisfactory";
+  return"not evidenced";}
 async function applyAssessorSigning(p,blobId,source,name){saveAssessorRecord(p,name);
   const flow=ui.assessorFlow||{mode:"all",selected:new Set()};
   const pairs=selectedSignOffPairs(p,flow);
   if(!pairs.length){toast("Choose at least one planned competence to sign off.");render();return;}
   const signedAt=new Date().toISOString();
   let marked=0;
-  pairs.forEach(({act,comp,crits})=>{
+  /* v0.2.24 item 2: sign only criteria that are really evidenced (same rule as Sign & lock) */
+  const skipped=[];
+  const pairs2=pairs.map(pr=>{const ok=[];pr.crits.forEach(k=>{const r=signSkipReason(p,k.id,pr.act.id);if(r)skipped.push({act:pr.act.n,id:k.id,why:r});else ok.push(k);});return Object.assign({},pr,{crits:ok});}).filter(pr=>pr.crits.length);
+  if(!pairs2.length){ui.assessorFlow=null;ui.signSkipped={list:skipped,signed:0};ui.modal="sign-skipped";render();return;}
+  pairs2.forEach(({act,comp,crits})=>{
     act.assessorSig={name:name||"",blobId,signedAt,source};
     if(name)act.assessorName=name;
     act.signOffSelections=(act.signOffSelections||[]).filter(sel=>sel.compId!==comp.id);
@@ -926,7 +942,8 @@ async function applyAssessorSigning(p,blobId,source,name){saveAssessorRecord(p,n
     act.sigAudit=act.sigAudit||[]; act.sigAudit.push({who:"assessor",name:name||"",at:signedAt,activity:act.id,mode:flow.mode,compId:comp.id,criteria:critIds,source});
   });
   ui.assessorFlow=null; ui.modal=null; save();
-  toast("Assessor signed off "+pairs.length+" competence(s) — "+marked+" criteria marked Signed. Signature will be applied to the paperwork on export.");
+  if(skipped.length){ui.signSkipped={list:skipped,signed:marked,comps:pairs2.length};ui.modal="sign-skipped";}
+  toast("Assessor signed off "+pairs2.length+" competence(s) — "+marked+" criteria marked Signed"+(skipped.length?", "+skipped.length+" skipped (not evidenced)":"")+". Signature will be applied to the paperwork on export.");
   render();
 }
 async function buildPdfPreview(scopeActId,onlyForWork){

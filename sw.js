@@ -1,5 +1,5 @@
 /* MTCS Tracker service worker — offline app shell. Bump VERSION on each release. */
-const VERSION = "mtcs-0.2.23.0";
+const VERSION = "mtcs-0.2.24.0";
 const CACHE = "mtcs-tracker:" + VERSION;
 const SHELL = ["./","index.html","manifest.webmanifest","css/styles.css","js/app.js","js/pack-meta.js","js/parser.js","js/cloud-config.js","js/cloud.js","js/smart-import.js","js/vendor/jszip.min.js","js/vendor/pdf-lib.min.js","js/vendor/pdf.min.js","js/vendor/pdf.worker.min.js","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-192.png","icons/icon-maskable-512.png","icons/apple-touch-icon.png","icons/cloud/google-drive.png","icons/cloud/onedrive.png"];
 const OPTIONAL = ["img/guide/guide-ring.png","img/guide/guide-direct.png","img/guide/guide-work-status.png","img/guide/guide-filters.png","img/guide/guide-chips.png","img/guide/guide-summary.png","img/guide/guide-preview.png","img/guide/guide-checklist.png","img/guide/guide-update.png"]; /* v0.2.16 guide images: precached, but a missing one never blocks install */;
