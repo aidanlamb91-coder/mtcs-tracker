@@ -2,7 +2,7 @@
    Data lives in this browser. Back up regularly. */
 (function(){
 "use strict";
-const APP_VERSION="0.2.26";
+const APP_VERSION="0.2.27";
 /* Cloudflare Worker for one-click MTCS pack fetch (worker/ in private src repo).
    Empty = not deployed yet: app falls back to Download-from-MTCS + Import picker. */
 const WORKER_BASE="https://mtcs-forms-fetch.aidanlamb91.workers.dev";
@@ -829,7 +829,8 @@ function submissionFormsPlan(p,scopeActId){
   /* v0.2.20: one Record of Witness per witness (not per activity) */
   /* v0.2.22: Witness Statement, one per witness per pack (route + Core) */
   witnessGroups(p,acts).forEach((g,i)=>{if(!g.w.id)return;if(!(g.sigs.length||g.w.wsSig||g.w.jobRole||g.w.email||g.w.phone||g.w.address))return; /* bare old free-text name: warned instead */const byPack=new Map();pool.filter(x=>/MTCS_WS_/i.test(x.fileName)).sort((a,b)=>rank(a)-rank(b)).forEach(t=>{const k=t.fileName;if(!byPack.has(k))byPack.set(k,t);});[...byPack.values()].forEach(tpl=>out.push({tpl,act:null,acts,witness:g.w,kind:"Witness Statement",key:"ws"+i+tpl.fileName,label:"Witness statement \u00b7 "+(g.w.name||"Witness")}));});
-  witnessGroups(p,acts).filter(g=>g.sigs.length).forEach((g,i)=>findAll(/Record_of_Witness/i).slice(0,1).forEach(tpl=>{const ch=[...new Set(g.sigs.map(x=>actChunk(x.act)))].sort((x,y)=>x-y);(ch.length?ch:[0]).forEach(c=>out.push({tpl,act:null,acts,witness:g.w,wsigs:g.sigs.filter(x=>actChunk(x.act)===c),chunk:c,kind:"Record of Witness",key:"w"+i+"c"+c,label:"Record of witness \u00b7 "+(g.w.name||"Witness")+(c?" \u00b7 Activities "+(c*3+1)+"-"+(c*3+3):"")}));}));
+  /* v0.2.27: a Record as soon as an activity has a witness (signed or not); unsigned activities list their planned competences, signature/date blank */
+  witnessGroups(p,acts).filter(g=>g.sigs.length||g.w.id).forEach((g,i)=>findAll(/Record_of_Witness/i).slice(0,1).forEach(tpl=>{const wplan=[];acts.forEach(a=>{const aw=actWitness(p,a);if(g.w.id&&aw&&aw.id===g.w.id&&!g.sigs.some(x=>x.act===a))plannedCompsFor(p,a).forEach(x=>wplan.push({act:a,compId:x.comp.id}));});const ch=[...new Set(g.sigs.concat(wplan).map(x=>actChunk(x.act)))].sort((x,y)=>x-y);(ch.length?ch:[0]).forEach(c=>out.push({tpl,act:null,acts,witness:g.w,wsigs:g.sigs.filter(x=>actChunk(x.act)===c),wplan:wplan.filter(x=>actChunk(x.act)===c),chunk:c,kind:"Record of Witness",key:"w"+i+"c"+c,label:"Record of witness \u00b7 "+(g.w.name||"Witness")+(c?" \u00b7 Activities "+(c*3+1)+"-"+(c*3+3):"")}));}));
   /* v0.2.20 item 7: one sign-off per assessor */
   const _ag=signOffAssessors(p,acts);
   findAll(/Assessor_SignOff/i).forEach(tpl=>{if(!seenSignOff.has(tpl.id)){seenSignOff.add(tpl.id);if(!_ag.length)out.push({tpl,act:acts[0]||null,acts,assessor:null,chunk:0,kind:"Assessor Sign-Off",label:"Assessor sign-off"});else _ag.forEach((g,i)=>{const ch=[...new Set(g.pairs.map(x=>actChunk(x.act)))].sort((x,y)=>x-y);ch.forEach(c=>out.push({tpl,act:acts[0]||null,acts,assessor:g,chunk:c,multi:_ag.length>1,key:"a"+i+"c"+c,kind:"Assessor Sign-Off",label:"Assessor sign-off"+(_ag.length>1?" \u00b7 "+(g.name||"Assessor "+(i+1)):"")+(c?" \u00b7 Activities "+(c*3+1)+"-"+(c*3+3):"")}));});}});
@@ -977,7 +978,7 @@ async function buildPdfPreview(scopeActId,onlyForWork){
   try{
     if(window.pdfjsLib&&window.pdfjsLib.GlobalWorkerOptions&&!window.pdfjsLib.GlobalWorkerOptions.workerSrc)window.pdfjsLib.GlobalWorkerOptions.workerSrc="js/vendor/pdf.worker.min.js";
     let entries=submissionFormsPlan(p,scopeActId||null);
-    if(onlyForWork==="criteria"){entries=entries.filter(e=>/^Competence|Assessor Sign-Off/i.test(e.kind));}else if(onlyForWork){const want=[/Assessment Plan/i,/Feedback/i,/Assessor Sign-Off/i,/^UKQ/i]; entries=entries.filter(e=>want.some(rx=>rx.test(e.kind)));}
+    if(onlyForWork==="criteria"){entries=entries.filter(e=>/^Competence|Assessor Sign-Off|Record of Witness/i.test(e.kind));}else if(onlyForWork){const want=[/Assessment Plan/i,/Feedback/i,/Assessor Sign-Off/i,/Record of Witness/i,/^UKQ/i]; entries=entries.filter(e=>want.some(rx=>rx.test(e.kind)));}
     const sum=buildSubmissionSummary(p,scopeActId||null);
     const pages=[];const codeFills=[];
     for(const entry of entries){
@@ -1018,8 +1019,8 @@ function buildSubmissionSummary(p,scopeActId){
   if(!S.templates.length)warnings.push("No blank MTCS forms stored in this browser — pack will contain evidence only.");
   if(!evList.length)warnings.push("No evidence files in scope.");
   if(!scopeActId&&CRITS.length&&CRITS.some(k=>critOverall(p,k.id)==="Gap"))warnings.push(CRITS.filter(k=>critOverall(p,k.id)==="Gap").length+" criteria are still Gap overall.");
-  /* v0.2.22: witnesses with no signatures get no Record of Witness — warn, naming missing details */
-  witnessGroups(p,acts).forEach(g=>{if(!g.sigs.length){const miss=["jobRole","email","phone"].filter(k=>!g.w[k]).map(k=>({jobRole:"job role",email:"email",phone:"contact number"}[k]));warnings.push("Witness "+(g.w.name||"")+" has not signed any competence — no Record of Witness made"+(miss.length?" (also missing: "+miss.join(", ")+")":"")+".");}if(g.w.id&&!(g.w.wsSig&&g.w.wsSig.blobId))warnings.push("Witness "+(g.w.name||"")+" has not signed the Witness Statement yet.");});
+  /* v0.2.22: old free-text witness names with no signatures get no Record of Witness — warn, naming missing details. v0.2.27: a witness record gets an unsigned Record */
+  witnessGroups(p,acts).forEach(g=>{if(!g.sigs.length){const miss=["jobRole","email","phone"].filter(k=>!g.w[k]).map(k=>({jobRole:"job role",email:"email",phone:"contact number"}[k]));warnings.push((g.w.id?"Record of Witness for "+(g.w.name||"")+" not signed yet — signature and date left blank":"Witness "+(g.w.name||"")+" has not signed any competence — no Record of Witness made")+(miss.length?" (also missing: "+miss.join(", ")+")":"")+".");}if(g.w.id&&!(g.w.wsSig&&g.w.wsSig.blobId))warnings.push("Witness "+(g.w.name||"")+" has not signed the Witness Statement yet.");});
   /* v0.2.20 item 8: check every planned criterion in this export's own scope */
   acts.forEach(a=>{const st=String(a.candidateComments||"").trim();if(!st)warnings.push("Activity "+a.n+": candidate statement is empty.");else if(st.length<60||!/[.!?)]$/.test(st))warnings.push("Activity "+a.n+": candidate statement looks unfinished.");
     if(!String(a.feedbackText||"").trim())warnings.push("Activity "+a.n+": no assessor feedback yet.");if(!String(a.furtherAction||"").trim())warnings.push("Activity "+a.n+": no further action for the candidate recorded.");
@@ -1184,6 +1185,7 @@ async function fillFormForSubmission(entry,p){
       if(fn.label)set(fn.label,compShortId(COMPS[rowIdx]));
       if(await drawSigAtField(pdf,form,fn.sig,sig.blobId,filled))set(fn.date,ukDate(sig.signedAt));
     }
+    for(const {compId} of (entry.wplan||[])){const rowIdx=COMPS.findIndex(c=>c.id===compId);if(rowIdx<0)continue;if(rowIdx>17){warn.push("Competence "+compShortId(COMPS[rowIdx])+" has no row on the Record of Witness.");continue;}const fn=signOffFieldNames(rowIdx,1);if(fn.label)set(fn.label,compShortId(COMPS[rowIdx]));} /* v0.2.27: planned rows labelled; signature and date left blank */
     const last=sigs.slice().sort((x,y)=>String(y.sig.signedAt).localeCompare(String(x.sig.signedAt)))[0];
     if(last&&await drawSigAtField(pdf,form,"Witness Signature",last.sig.blobId,filled))set("Witness Signature Date",ukDate(last.sig.signedAt));
     if(entry.chunk)warn.push("Activities "+(entry.chunk*3+1)+"-"+(entry.chunk*3+3)+" are on this extra copy of the Record of Witness: its columns 1-3 mean those activities — relabel the column headings by hand.");
