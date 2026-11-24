@@ -753,3 +753,8 @@ ul.plain{list-style:none;padding:0;margin:4px 0}
 /* v0.2.31 remote signatures */
 .rm-sign-comp{padding:6px 0;border-bottom:1px solid #eef1f5}
 .rm-sig{display:flex;align-items:center;gap:10px;margin:8px 0}.rm-sig img{max-width:70%;max-height:90px;border:1px solid #e3e8ef;border-radius:8px;background:#fff}
+/* v0.2.33 invite QR */
+.lv-qr{display:flex;flex-direction:column;align-items:center;margin:12px 0 4px}
+.lv-qr svg{width:220px;max-width:70vw;height:auto;border:1px solid #dfe6ee;border-radius:8px}
+.lv-qr-code{font:700 1.6rem/1.2 ui-monospace,Menlo,monospace;letter-spacing:.2em;margin-top:6px}
+.lv-qr-row{justify-content:center}
