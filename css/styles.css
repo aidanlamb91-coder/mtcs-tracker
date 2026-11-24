@@ -758,3 +758,5 @@ ul.plain{list-style:none;padding:0;margin:4px 0}
 .lv-qr svg{width:220px;max-width:70vw;height:auto;border:1px solid #dfe6ee;border-radius:8px}
 .lv-qr-code{font:700 1.6rem/1.2 ui-monospace,Menlo,monospace;letter-spacing:.2em;margin-top:6px}
 .lv-qr-row{justify-content:center}
+/* v0.2.34 remote assessor/witness names in block capitals */
+[data-rfield=assessorName],[data-rwitness]{text-transform:uppercase}
