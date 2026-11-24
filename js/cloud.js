@@ -182,10 +182,10 @@
       return ((j && j.files) || []).map(f => ({ id: f.id, name: f.name, size: Number(f.size) || 0, modified: Date.parse(f.modifiedTime) || 0 }));
     },
     read(id) { return api(DRIVE + "/files/" + encodeURIComponent(id) + "?alt=media", null, "blob"); },
-    async write(folderId, blob, existingId) {
+    async write(folderId, blob, existingId, name) { name = name || ZIP_NAME; /* v0.2.29: optional name (Evidence pack copies) */
       const start = await api(existingId ? DRIVE_UP + "/files/" + encodeURIComponent(existingId) + "?uploadType=resumable&fields=id,size,modifiedTime" : DRIVE_UP + "/files?uploadType=resumable&fields=id,size,modifiedTime",
         { method: existingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": "application/zip", "X-Upload-Content-Length": String(blob.size) },
-          body: JSON.stringify(existingId ? { name: ZIP_NAME } : { name: ZIP_NAME, parents: [folderId], mimeType: "application/zip" }) }, "raw");
+          body: JSON.stringify(existingId ? { name } : { name, parents: [folderId], mimeType: "application/zip" }) }, "raw");
       const where = start.headers.get("Location"); if (!where) throw new Error("Google Drive did not return an upload address.");
       const res = await fetch(where, { method: "PUT", headers: { "Content-Type": "application/zip" }, body: await blob.arrayBuffer() }); /* v0.2.18 Safari: send bytes, not a Blob */
       if (!res.ok) throw new Error(cloudMessage(res.status, await res.text()));
@@ -201,8 +201,8 @@
       return ((j && j.value) || []).filter(f => f.file).map(f => ({ id: f.id, name: f.name, size: f.size || 0, modified: Date.parse(f.lastModifiedDateTime) || 0 }));
     },
     async read(id) { const meta = await api(GRAPH + "/me/drive/items/" + id + "?$select=id,@microsoft.graph.downloadUrl"); const res = await fetch(meta["@microsoft.graph.downloadUrl"]); if (!res.ok) throw new Error(cloudMessage(res.status, "")); return res.blob(); },
-    async write(folderId, blob) {
-      const path = GRAPH + "/me/drive/items/" + folderId + ":/" + encodeURIComponent(ZIP_NAME) + ":";
+    async write(folderId, blob, existingId, name) {
+      const path = GRAPH + "/me/drive/items/" + folderId + ":/" + encodeURIComponent(name || ZIP_NAME) + ":";
       if (blob.size <= 4 * 1024 * 1024) { const j = await api(path + "/content", { method: "PUT", headers: { "Content-Type": "application/zip" }, body: await blob.arrayBuffer() }); /* v0.2.18 Safari: send bytes, not a Blob */ return { size: j.size || blob.size, modified: Date.parse(j.lastModifiedDateTime) || Date.now() }; }
       const sess = await api(path + "/createUploadSession", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item: { "@microsoft.graph.conflictBehavior": "replace" } }) });
       const CHUNK = 320 * 1024 * 16; let last = null;
@@ -246,11 +246,20 @@
     } catch (e) { if (e instanceof SignInRequired) save({ needsSignIn: true }); const msg = friendly(e); save({ lastError: msg }); return { error: msg }; }
     finally { busy = false; resumeFor = null; emit(); }
   }
+  /** v0.2.29: save a named copy (e.g. an Evidence pack) next to the backup; the user shares it from Drive/OneDrive themselves. */
+  async function saveFile(name, blob) {
+    const s = load(); if (!s.kind) return { error: "Not connected." }; if (busy) return { error: "Busy with a backup — try again in a moment." };
+    if (!navigator.onLine) return { error: "You're offline — try again when you have a connection." };
+    busy = true; resumeFor = null; interactive = true; emit();
+    try { const fid = await folderId(), p = provider(); const existing = (await p.list(fid)).find(f => f.name === name); await p.write(fid, blob, existing && existing.id, name); return { ok: true, label: status().label }; }
+    catch (e) { if (e instanceof SignInRequired) save({ needsSignIn: true }); return { error: friendly(e), signIn: e instanceof SignInRequired }; }
+    finally { busy = false; emit(); }
+  }
   async function disconnect() { const s = load();
     if (s.kind === "google" && s.grt) { try { await workerPost("/google/revoke", { sealed_refresh: s.grt }); } catch (_) {} }
     else if (s.kind === "google" && s.access) await google.revoke(s.access);
     localStorage.removeItem(STATE_KEY); emit(); }
 
   global.MtcsCloud = { KINDS, FOLDER_NAME, ZIP_NAME, GOOGLE_SCOPES, ONEDRIVE_SCOPES, status, onChange: fn => (listeners.add(fn), () => listeners.delete(fn)),
-    buildAuthUrl, startSignIn, completeRedirect, workerOk, backup, download, disconnect, friendly, _internal: { load, save, challengeFor, b64url, hasLanded: () => !!landed } };
+    buildAuthUrl, startSignIn, completeRedirect, workerOk, backup, download, saveFile, disconnect, friendly, _internal: { load, save, challengeFor, b64url, hasLanded: () => !!landed } };
 })(window);
